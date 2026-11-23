@@ -117,7 +117,13 @@ int identities_normalize(hw_type t, const char *raw, char *out, int max) {
     return 0;
 }
 
-int identities_load(const char *path, hw_identity *out, int max, int *count) {
+/* Helper: report a skipped malformed line (callback optional) */
+static void warn_line(pamhw_warn_fn warn, void *warn_ctx, int line_no, const char *reason) {
+    if (warn) warn(warn_ctx, line_no, reason);
+}
+
+int identities_load(const char *path, hw_identity *out, int max, int *count,
+                    pamhw_warn_fn warn, void *warn_ctx) {
     *count = 0;
     
     FILE *f = fopen(path, "r");
@@ -168,7 +174,10 @@ int identities_load(const char *path, hw_identity *out, int max, int *count) {
         }
         
         /* Must have at least type, ident, user */
-        if (ntokens < 3) continue;
+        if (ntokens < 3) {
+            warn_line(warn, warn_ctx, line_no, "expected: type identifier user [attr=value ...]");
+            continue;
+        }
         
         safe_strcpy(type_str, tokens[0], sizeof(type_str));
         safe_strcpy(ident, tokens[1], sizeof(ident));
@@ -181,7 +190,7 @@ int identities_load(const char *path, hw_identity *out, int max, int *count) {
         } else if (strcmp(type_str, "bt") == 0) {
             type = HW_BT;
         } else {
-            /* Unknown type - skip line */
+            warn_line(warn, warn_ctx, line_no, "unknown device type");
             continue;
         }
         
@@ -209,7 +218,10 @@ int identities_load(const char *path, hw_identity *out, int max, int *count) {
             }
         }
         
-        if (malformed_attr) continue;
+        if (malformed_attr) {
+            warn_line(warn, warn_ctx, line_no, "unknown attribute");
+            continue;
+        }
         
         /* Add to output if space available */
         if (*count < max) {

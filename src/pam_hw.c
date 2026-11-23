@@ -15,6 +15,12 @@
 #include "usb_detect.h"
 #include "evaluate.h"
 
+/* Parser warning sink: malformed identities lines go to syslog */
+static void identities_warn_syslog(void *ctx, int line_no, const char *reason) {
+    pam_syslog((pam_handle_t *)ctx, LOG_WARNING,
+               "pam_hw: identities:%d: malformed line, skipped (%s)", line_no, reason);
+}
+
 /* Capacity limits for fixed-size arrays */
 #define MAX_IDENTITIES 64
 #define MAX_DEVICES 64
@@ -82,7 +88,8 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
     /* Load identities */
     hw_identity identities[MAX_IDENTITIES];
     int identity_count = 0;
-    if (identities_load("/etc/pamhw/identities", identities, MAX_IDENTITIES, &identity_count) != 0) {
+    if (identities_load("/etc/pamhw/identities", identities, MAX_IDENTITIES, &identity_count,
+                        identities_warn_syslog, pamh) != 0) {
         pam_syslog(pamh, LOG_WARNING, "pam_hw: identities_load failed");
         return PAM_IGNORE;
     }

@@ -1234,3 +1234,26 @@ T(probe_path_overrides_refused_nonroot) {
         EXPECT_INT_EQ(0, strlen(output));
     }
 }
+
+/* Test: probe reports malformed identities lines on stderr (I1) */
+T(probe_list_warns_malformed_line) {
+    char root[] = "/tmp/probe_test_XXXXXX";
+    EXPECT_TRUE(mkdtemp(root) != NULL);
+    char identities_path[512], conf_path[512];
+    snprintf(identities_path, sizeof(identities_path), "%s/identities", root);
+    snprintf(conf_path, sizeof(conf_path), "%s/pamhw.conf", root);
+    FILE *f = fopen(identities_path, "w");
+    fprintf(f, "usb\t1234:5678\talice\n");
+    fprintf(f, "garbage\n");
+    fclose(f);
+    f = fopen(conf_path, "w");
+    fprintf(f, "sys_root=%s/nosys\n", root);
+    fclose(f);
+    const char *argv[] = {"./pam-hw-probe-test", "list", "--conf", conf_path,
+                          "--identities", identities_path, NULL};
+    char output[4096], errout[4096];
+    int exit_code = run_probe_both(argv, output, sizeof(output), errout, sizeof(errout));
+    EXPECT_INT_EQ(0, exit_code);
+    EXPECT_TRUE(contains(errout, ":2: malformed line, skipped"));
+    remove_tree(root);
+}

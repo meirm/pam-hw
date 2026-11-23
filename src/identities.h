@@ -4,6 +4,8 @@
 #ifndef IDENTITIES_H
 #define IDENTITIES_H
 
+#include "warn.h"
+
 /* Hardware types */
 typedef enum {
     HW_BT,
@@ -25,9 +27,12 @@ typedef struct {
  * Load identities from file.
  * Returns 0 on success (missing file ⇒ count=0, still returns 0).
  * Malformed lines are skipped (line_no recorded), comments and blanks ignored.
+ * Each skipped malformed line is reported through warn (NULL tolerated)
+ * with its line number and a reason.
  * count: set to number of loaded identities.
  */
-int identities_load(const char *path, hw_identity *out, int max, int *count);
+int identities_load(const char *path, hw_identity *out, int max, int *count,
+                    pamhw_warn_fn warn, void *warn_ctx);
 
 /*
  * Normalize hardware identifier.

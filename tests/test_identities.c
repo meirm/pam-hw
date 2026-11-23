@@ -33,7 +33,7 @@ T(parse_valid_lines) {
     
     hw_identity ids[10];
     int count = 0;
-    int ret = identities_load(path, ids, 10, &count);
+    int ret = identities_load(path, ids, 10, &count, NULL, NULL);
     
     EXPECT_INT_EQ(0, ret);
     EXPECT_INT_EQ(3, count);
@@ -81,7 +81,7 @@ T(malformed_line_skipped) {
     
     hw_identity ids[10];
     int count = 0;
-    int ret = identities_load(path, ids, 10, &count);
+    int ret = identities_load(path, ids, 10, &count, NULL, NULL);
     
     EXPECT_INT_EQ(0, ret);
     EXPECT_INT_EQ(2, count);
@@ -94,6 +94,54 @@ T(malformed_line_skipped) {
     EXPECT_STR_EQ("1234:5678", ids[1].ident);
     EXPECT_STR_EQ("user2", ids[1].user);
     EXPECT_INT_EQ(3, ids[1].line_no);
+    
+    unlink(path);
+}
+
+/* Warning-callback recorder for identities_load tests */
+typedef struct {
+    int calls;
+    int line_nos[8];
+    char reasons[8][128];
+} warn_record;
+
+static void record_warn(void *ctx, int line_no, const char *reason) {
+    warn_record *r = ctx;
+    if (r->calls < 8) {
+        r->line_nos[r->calls] = line_no;
+        snprintf(r->reasons[r->calls], sizeof(r->reasons[0]), "%s", reason);
+    }
+    r->calls++;
+}
+
+/* Test: malformed sandwich fires the warning callback with the line number (Review Focus 3) */
+T(malformed_line_warns) {
+    char path[] = "/tmp/identities_test_XXXXXX";
+    int fd = mkstemp(path);
+    EXPECT_TRUE(fd >= 0);
+    close(fd);
+    
+    write_temp_file(path,
+        "usb\t046d:c52b\tuser1\n"
+        "invalid line\n"
+        "usb\t1234:5678\tuser2\tbogus=1\n"
+        "nfc\t1234:5678\tuser2\n"
+        "usb\t1234:5678\tuser2\n");
+    
+    hw_identity ids[10];
+    int count = 0;
+    warn_record rec = {0};
+    EXPECT_INT_EQ(0, identities_load(path, ids, 10, &count, record_warn, &rec));
+    EXPECT_INT_EQ(2, count);
+    EXPECT_INT_EQ(3, rec.calls);
+    EXPECT_INT_EQ(2, rec.line_nos[0]);
+    EXPECT_INT_EQ(3, rec.line_nos[1]);
+    EXPECT_INT_EQ(4, rec.line_nos[2]);
+    EXPECT_TRUE(rec.reasons[0][0] != '\0');
+    
+    /* NULL callback tolerated */
+    EXPECT_INT_EQ(0, identities_load(path, ids, 10, &count, NULL, NULL));
+    EXPECT_INT_EQ(2, count);
     
     unlink(path);
 }
@@ -118,7 +166,7 @@ T(comments_and_blanks_ignored) {
     
     hw_identity ids[10];
     int count = 0;
-    int ret = identities_load(path, ids, 10, &count);
+    int ret = identities_load(path, ids, 10, &count, NULL, NULL);
     
     EXPECT_INT_EQ(0, ret);
     EXPECT_INT_EQ(2, count);
@@ -133,7 +181,7 @@ T(comments_and_blanks_ignored) {
 T(missing_file_returns_zero_count) {
     hw_identity ids[10];
     int count = -1;
-    int ret = identities_load("/nonexistent/file", ids, 10, &count);
+    int ret = identities_load("/nonexistent/file", ids, 10, &count, NULL, NULL);
     
     EXPECT_INT_EQ(0, ret);
     EXPECT_INT_EQ(0, count);
@@ -362,7 +410,7 @@ T(save_load_roundtrip) {
     
     hw_identity loaded[10];
     int count = 0;
-    ret = identities_load(path, loaded, 10, &count);
+    ret = identities_load(path, loaded, 10, &count, NULL, NULL);
     
     EXPECT_INT_EQ(0, ret);
     EXPECT_INT_EQ(3, count);
@@ -396,7 +444,7 @@ T(unknown_attribute_malformed) {
     
     hw_identity ids[10];
     int count = 0;
-    int ret = identities_load(path, ids, 10, &count);
+    int ret = identities_load(path, ids, 10, &count, NULL, NULL);
     
     EXPECT_INT_EQ(0, ret);
     EXPECT_INT_EQ(2, count);  /* Line 2 should be skipped */
@@ -423,7 +471,7 @@ T(parse_space_separated) {
     
     hw_identity ids[10];
     int count = 0;
-    int ret = identities_load(path, ids, 10, &count);
+    int ret = identities_load(path, ids, 10, &count, NULL, NULL);
     
     EXPECT_INT_EQ(0, ret);
     EXPECT_INT_EQ(3, count);
@@ -462,7 +510,7 @@ T(parse_mixed_whitespace) {
     
     hw_identity ids[10];
     int count = 0;
-    int ret = identities_load(path, ids, 10, &count);
+    int ret = identities_load(path, ids, 10, &count, NULL, NULL);
     
     EXPECT_INT_EQ(0, ret);
     EXPECT_INT_EQ(2, count);

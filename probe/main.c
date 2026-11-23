@@ -63,6 +63,12 @@ static void usage(FILE *out) {
     fprintf(out, "  --identities PATH             Override identities file (root only)\n");
 }
 
+/* Parser warning sink: malformed identities lines go to stderr */
+static void identities_warn_stderr(void *ctx, int line_no, const char *reason) {
+    fprintf(stderr, "Warning: %s:%d: malformed line, skipped (%s)\n",
+            (const char *)ctx, line_no, reason);
+}
+
 /* Helper: get invoker username from uid */
 static int get_username(uid_t uid, char *buf, size_t size) {
     struct passwd *pw = getpwuid(uid);
@@ -199,7 +205,8 @@ static int cmd_list(int argc, char **argv) {
     /* Load identities */
     hw_identity identities[256];
     int identity_count = 0;
-    if (identities_load(identities_path, identities, 256, &identity_count) != 0) {
+    if (identities_load(identities_path, identities, 256, &identity_count,
+                        identities_warn_stderr, (void *)identities_path) != 0) {
         fprintf(stderr, "Error: failed to load identities\n");
         return 1;
     }
@@ -376,7 +383,8 @@ static int cmd_add(int argc, char **argv) {
     /* Load existing identities */
     hw_identity identities[256];
     int identity_count = 0;
-    identities_load(identities_path, identities, 256, &identity_count);
+    identities_load(identities_path, identities, 256, &identity_count,
+                        identities_warn_stderr, (void *)identities_path);
     
     /* Resolve identifier */
     char ident[128];
@@ -522,7 +530,8 @@ static int cmd_remove(int argc, char **argv) {
     /* Load existing identities */
     hw_identity identities[256];
     int identity_count = 0;
-    if (identities_load(identities_path, identities, 256, &identity_count) != 0) {
+    if (identities_load(identities_path, identities, 256, &identity_count,
+                        identities_warn_stderr, (void *)identities_path) != 0) {
         /* Missing file is OK for remove */
         return 0;
     }
