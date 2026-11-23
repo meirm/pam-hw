@@ -12,11 +12,11 @@ $ sudo pamhw-probe add 0a12:0001:0123456789
 added: usb 0a12:0001:0123456789 → me (verify=presence)
 ```
 
-> **Status: R0 — documentation first.** This README is the specification
-> for pam-hw; it describes the finished product. Capabilities arrive with
-> the releases in [Roadmap](#roadmap); anything not yet shipped is marked
-> ⚠. The legacy one-MAC `pam_bluetooth` module this replaces is unchanged
-> until R1 lands.
+> **Status: R1 — USB presence shipped.** USB sticks work today (presence
+> tier, sufficient/mandatory). Bluetooth arrives in R2, secret tier in
+> R3, ESP32 signing in R4 — see Roadmap. This README is the specification;
+> capabilities arrive with the releases they name; not-yet-shipped features
+> are marked ⚠.
 
 > **Honesty first:** pam-hw is a *convenience factor*, not real 2FA.
 > USB serials and Bluetooth addresses can be spoofed; a **stolen** stick
@@ -167,16 +167,18 @@ denies; otherwise it falls through.
 **Local only:** the module checks `PAM_RHOST`/`PAM_TTY`/`PAM_SERVICE` and
 steps aside on anything that smells remote (`rhost` set, `ssh`/`notty` TTYs), regardless of mode. Even if someone wires it into
 `/etc/pam.d/sshd` by mistake, it will never authenticate remotely.
-⚠ Mandatory-mode users: scheduled jobs (`cron`, …) are local too and get
+Mandatory-mode users: scheduled jobs (`cron`, …) are local too and get
 **denied** without a device — whitelist the services you actually want
 (`services=`) or give the job a device.
+
+BT (`bt`) lines are parsed but inert until R2 ships — a `bt` line never passes or denies in R1 (a `mode=mandatory bt` line therefore does not deny yet).
 
 ## Roadmap
 
 | Release | Delivers | Status |
 |---|---|---|
 | R0 | This README — the spec | **this release** |
-| R1 | USB presence, sufficient/mandatory, `pamhw-probe list/add/remove`, fake-sysfs test suite (incl. not-enrolled cases) | planned |
+| R1 | USB presence, sufficient/mandatory, `pamhw-probe list/add/remove`, fake-sysfs test suite (incl. not-enrolled cases) | **shipped** |
 | R2 | Bluetooth presence (`bt` lines; `bt_presence = connected\|visible` — phones drop connections to save power) | planned |
 | R3 | Secret tier: `.pamhw.sec` on the stick, salted-hash check, ro-mount machinery, `pamhw-probe hash` | planned |
 | R4 | ESP32 sign tier: challenge-response over Bluetooth SPP, ECDSA P-256, reference sketch in-tree | planned |

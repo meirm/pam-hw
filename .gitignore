@@ -3,4 +3,5 @@ pam_bluetooth.o
 # pam-hw build artifacts
 pam_hw.so
 pam-hw-probe
+pam-hw-probe-test
 tests/run_tests

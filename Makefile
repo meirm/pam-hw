@@ -4,6 +4,11 @@ CC = gcc
 CFLAGS = -std=c99 -Wall -Wextra -O2
 LDFLAGS = -lpam
 
+# Install paths
+PREFIX = /usr/local
+PAMDIR = /lib64/security
+DESTDIR =
+
 # Targets
 MODULE = pam_hw.so
 PROBE = pam-hw-probe
@@ -40,12 +45,18 @@ $(TEST_BIN): $(TEST_SRC) src/identities.c src/config.c src/usb_detect.c src/eval
 test: $(TEST_BIN) $(PROBE) $(PROBE_TEST)
 	./$(TEST_BIN)
 
-# Install/uninstall stubs (finalized in Task 9)
-install:
-	@echo "Install target: stub (will be implemented in Task 9)"
+# Install
+install: $(MODULE) $(PROBE)
+	install -d -m 0700 $(DESTDIR)/etc/pamhw
+	install -d $(DESTDIR)$(PAMDIR)
+	install -m 0644 $(MODULE) $(DESTDIR)$(PAMDIR)/$(MODULE)
+	install -d $(DESTDIR)$(PREFIX)/sbin
+	install -m 0755 $(PROBE) $(DESTDIR)$(PREFIX)/sbin/pamhw-probe
 
+# Uninstall
 uninstall:
-	@echo "Uninstall target: stub (will be implemented in Task 9)"
+	rm -f $(DESTDIR)$(PAMDIR)/$(MODULE)
+	rm -f $(DESTDIR)$(PREFIX)/sbin/pamhw-probe
 
 # Clean build artifacts
 clean:
