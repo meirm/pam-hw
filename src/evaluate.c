@@ -1,9 +1,12 @@
 /*
  * evaluate.c — Device evaluation and PAM result aggregation
  */
+#define _POSIX_C_SOURCE 200809L
 #include "evaluate.h"
 #include <security/pam_modules.h>
 #include <string.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 
 /* Helper: Check if string starts with prefix */
 static int starts_with(const char *str, const char *prefix) {
@@ -41,13 +44,29 @@ static int service_in_whitelist(const char *service, const char *whitelist) {
     return 0;
 }
 
+/*
+ * Helper: rhost names this machine: "localhost", an IPv4 address in
+ * 127.0.0.0/8, or the IPv6 loopback ::1. Any other hostname is remote.
+ */
+static int is_local_rhost(const char *rhost) {
+    struct in_addr v4;
+    struct in6_addr v6;
+
+    if (strcmp(rhost, "localhost") == 0) return 1;
+    if (inet_pton(AF_INET, rhost, &v4) == 1) {
+        return (ntohl(v4.s_addr) >> 24) == 127;
+    }
+    if (inet_pton(AF_INET6, rhost, &v6) == 1) {
+        return IN6_IS_ADDR_LOOPBACK(&v6);
+    }
+    return 0;
+}
+
 int pamhw_local_only(const char *rhost, const char *tty,
                      const char *service, const char *services_whitelist) {
     /* Check rhost: non-empty and not localhost/127.x/::1 => remote */
     if (rhost && *rhost != '\0') {
-        if (strcmp(rhost, "localhost") != 0 &&
-            !starts_with(rhost, "127.") &&
-            strcmp(rhost, "::1") != 0) {
+        if (!is_local_rhost(rhost)) {
             return 0;  /* Remote host */
         }
     }

@@ -438,3 +438,23 @@ T(internal_error_result_per_mode) {
     cfg.mode[0] = '\0';
     EXPECT_INT_EQ(PAM_IGNORE, pamhw_internal_error_result(&cfg));
 }
+
+/* === RHOST loopback parsed as an address, not a string prefix (M5) === */
+
+/* Test: hostnames that merely start with "127." are remote */
+T(local_only_127_hostname_remote) {
+    EXPECT_INT_EQ(0, pamhw_local_only("127.attacker.example", "tty1", "sudo", ""));
+    EXPECT_INT_EQ(0, pamhw_local_only("127.0.0.1.attacker.example", "tty1", "sudo", ""));
+    EXPECT_INT_EQ(0, pamhw_local_only("127.", "tty1", "sudo", ""));
+    EXPECT_INT_EQ(0, pamhw_local_only("::1.example", "tty1", "sudo", ""));
+    EXPECT_INT_EQ(0, pamhw_local_only("host.example", "tty1", "sudo", ""));
+}
+
+/* Test: 127.0.0.0/8 and ::1 are local; other IPv4/IPv6 addresses are remote */
+T(local_only_loopback_addresses) {
+    EXPECT_INT_EQ(1, pamhw_local_only("127.255.255.254", "tty1", "sudo", ""));
+    EXPECT_INT_EQ(1, pamhw_local_only("0:0:0:0:0:0:0:1", "tty1", "sudo", ""));
+    EXPECT_INT_EQ(0, pamhw_local_only("128.0.0.1", "tty1", "sudo", ""));
+    EXPECT_INT_EQ(0, pamhw_local_only("fe80::1", "tty1", "sudo", ""));
+    EXPECT_INT_EQ(0, pamhw_local_only("::2", "tty1", "sudo", ""));
+}

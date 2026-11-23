@@ -24,7 +24,8 @@ typedef enum {
  *   0: Step aside (remote session or service not in whitelist)
  * 
  * Steps aside (returns 0) if:
- *   - rhost is non-empty and not localhost/127.x.x.x/::1
+ *   - rhost is non-empty and not "localhost", an IPv4 address in
+ *     127.0.0.0/8, or ::1 (parsed with inet_pton; hostnames are remote)
  *   - tty is/starts with "ssh" or equals "notty"
  *   - services_whitelist is non-empty and service is not in it
  */
