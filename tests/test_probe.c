@@ -1371,3 +1371,38 @@ T(probe_flow_capitalized_serial_matches) {
     
     remove_tree(root);
 }
+
+/* === --verify option forms (M7) === */
+
+/* Test: both --verify presence and --verify=presence are accepted; --verify=secret refused */
+T(probe_add_verify_equals_form) {
+    if (!get_test_username(1000)) {
+        fprintf(stderr, "Warning: UID 1000 has no username, skipping test\n");
+        return;
+    }
+    char root[] = "/tmp/probe_test_XXXXXX";
+    EXPECT_TRUE(mkdtemp(root) != NULL);
+    char identities_path[512];
+    snprintf(identities_path, sizeof(identities_path), "%s/identities", root);
+    char output[4096], errout[4096];
+    
+    const char *eq_argv[] = {"./pam-hw-probe-test", "add", "1234:5678", "--verify=presence",
+                             "--identities", identities_path, NULL};
+    EXPECT_INT_EQ(0, run_probe_test_env(eq_argv, output, sizeof(output), errout, sizeof(errout),
+                                        "0", "0", "1000"));
+    const char *sp_argv[] = {"./pam-hw-probe-test", "add", "abcd:ef01", "--verify", "presence",
+                             "--identities", identities_path, NULL};
+    EXPECT_INT_EQ(0, run_probe_test_env(sp_argv, output, sizeof(output), errout, sizeof(errout),
+                                        "0", "0", "1000"));
+    char file_content[4096];
+    EXPECT_INT_EQ(0, read_file(identities_path, file_content, sizeof(file_content)));
+    EXPECT_TRUE(contains(file_content, "1234:5678"));
+    EXPECT_TRUE(contains(file_content, "abcd:ef01"));
+    
+    const char *secret_argv[] = {"./pam-hw-probe-test", "add", "1111:2222", "--verify=secret",
+                                 "--identities", identities_path, NULL};
+    EXPECT_INT_EQ(1, run_probe_test_env(secret_argv, output, sizeof(output), errout, sizeof(errout),
+                                        "0", "0", "1000"));
+    EXPECT_TRUE(contains(errout, "arrives in R3/R4"));
+    remove_tree(root);
+}

@@ -751,3 +751,48 @@ T(load_inline_comment) {
     EXPECT_STR_EQ("dave", ids[1].user);
     unlink(path);
 }
+
+/* Test: README "How it works" identities example parses verbatim, no warnings (M7) */
+T(load_readme_example_verbatim) {
+    char path[] = "/tmp/identities_test_XXXXXX";
+    int fd = mkstemp(path);
+    EXPECT_TRUE(fd >= 0);
+    close(fd);
+    write_temp_file(path,
+        "# type  identifier                user   [verify=\xe2\x80\xa6] [mode=\xe2\x80\xa6] [pubkey=path]\n"
+        "usb     0a12:0001:0123456789     me\n"
+        "bt      AA:BB:CC:DD:EE:FF        me\n"
+        "usb     1058:25a3                carol              # no serial \xe2\x80\x94 weak, see below\n");
+    hw_identity ids[10];
+    int count = 0;
+    warn_record rec = {0};
+    EXPECT_INT_EQ(0, identities_load(path, ids, 10, &count, record_warn, &rec));
+    EXPECT_INT_EQ(0, rec.calls);
+    EXPECT_INT_EQ(3, count);
+    EXPECT_STR_EQ("1058:25a3", ids[2].ident);
+    EXPECT_STR_EQ("carol", ids[2].user);
+    unlink(path);
+}
+
+/* Test: spec "Data files" identities example parses verbatim, no warnings */
+T(load_spec_example_verbatim) {
+    char path[] = "/tmp/identities_test_XXXXXX";
+    int fd = mkstemp(path);
+    EXPECT_TRUE(fd >= 0);
+    close(fd);
+    write_temp_file(path,
+        "# type  identifier                user    [attr=value ...]\n"
+        "bt      AA:BB:CC:DD:EE:FF         alice\n"
+        "usb     0a12:0001:0123456789      alice   verify=secret\n"
+        "usb     1058:25a3                 carol\n"
+        "bt      DC:54:75:C2:AB:12         bob     verify=sign pubkey=/etc/pamhw/keys/bob.pub mode=mandatory\n");
+    hw_identity ids[10];
+    int count = 0;
+    warn_record rec = {0};
+    EXPECT_INT_EQ(0, identities_load(path, ids, 10, &count, record_warn, &rec));
+    EXPECT_INT_EQ(0, rec.calls);
+    EXPECT_INT_EQ(4, count);
+    EXPECT_STR_EQ("secret", ids[1].verify);
+    EXPECT_STR_EQ("mandatory", ids[3].mode);
+    unlink(path);
+}

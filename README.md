@@ -9,7 +9,8 @@ Or, configured *mandatory*: no device, no login.
 $ sudo pamhw-probe list
 usb  0a12:0001:0123456789   # SanDisk Ultra
 $ sudo pamhw-probe add 0a12:0001:0123456789
-added: usb 0a12:0001:0123456789 → me (verify=presence)
+$ sudo pamhw-probe list --mine
+usb  0a12:0001:0123456789  me  verify=presence
 ```
 
 > **Status: R1 — USB presence shipped.** USB sticks work today (presence
@@ -47,7 +48,7 @@ added: usb 0a12:0001:0123456789 → me (verify=presence)
 
 - Linux with a modern `/sys` layout (developed on Fedora).
 - A PAM stack you are allowed to edit (root).
-- ⚠ OpenSSL libcrypto from R2 on (hashing, signature verification).
+- ⚠ OpenSSL libcrypto from R3 on (hashing, signature verification).
 
 ## Install
 
@@ -71,15 +72,17 @@ sudo make install          # installs /lib64/security/pam_hw.so and pamhw-probe
 
    This is the exact same detection the module does — if your stick is
    not listed here, it will never match. Sticks that report no serial
-   fall back to `vid:pid` only; two identical stick models then share an
-   identity (⚠ weak — noted in the listing).
+   fall back to `vid:pid` only (the listing shows them without a serial
+   part); two identical stick models then share an identity (⚠ weak).
+   Identifiers are case-insensitive on input and stored lowercase.
 
 2. **Enroll it for your user** (you can only enroll *yourself*; devices
    already claimed by another user are refused — hijack guard):
 
    ```sh
-   sudo pamhw-probe add 0a12:0001:0123456789
-   added: usb 0a12:0001:0123456789 → me (verify=presence)
+   sudo pamhw-probe add 0a12:0001:0123456789    # silent on success
+   sudo pamhw-probe list --mine                 # your lines, plugged in or not
+   usb  0a12:0001:0123456789  me  verify=presence
    ```
 
 3. **Wire the PAM stack** for the services you want (e.g.
@@ -117,14 +120,14 @@ sudo make install          # installs /lib64/security/pam_hw.so and pamhw-probe
 
 ## Configuration reference
 
-### `/etc/pamhw/pamhw.conf` — `key = value`, `#` comments
+### `/etc/pamhw/pamhw.conf` — `key = value`, `#` comments (a `#` at line start or after whitespace starts a comment)
 
 | Key           | Default              | Meaning |
 |---------------|----------------------|---------|
-| `mode`        | `sufficient`         | `sufficient` ⇒ absent device falls through to password; `mandatory` ⇒ absent device refuses login |
-| `verify`      | `presence`           | Default tier; per-line `verify=` overrides. ⚠ `secret` R3, `sign` R4 |
+| `mode`        | `sufficient`         | `sufficient` ⇒ absent device falls through to password; `mandatory` ⇒ absent device refuses login. Unknown values are logged and ignored |
+| `verify`      | `presence`           | Default tier; per-line `verify=` overrides. ⚠ `secret` R3, `sign` R4 — in R1 a device whose tier is `secret`/`sign` is present-but-unverifiable and denies. Unknown values are logged and ignored |
 | `timeout_ms`  | `3000`               | Bound on all device I/O |
-| `debug`       | `false`              | Verbose `pam_syslog` tracing |
+| `debug`       | `false`              | Verbose `pam_syslog` tracing (`true`/`false`, `yes`/`no`, `1`/`0`) |
 | `services`    | *(empty = all local)*| Whitelist of PAM services allowed to use the module; anything else is ignored. Recommended for mandatory mode: `gdm-password,login,sudo,gnome-screensaver,polkit-1` |
 | `secret_path` | `.pamhw.sec`         | ⚠ R3 — secret file on the stick, relative to mount root |
 | `mount_dir`   | `/run/pamhw/mnt`     | ⚠ R3 — private read-only mount point |
@@ -138,11 +141,17 @@ usb     vid:pid[:serial]           user   [verify=presence|secret] [mode=suffici
 bt      AA:BB:CC:DD:EE:FF          user   [verify=…] [mode=…] [pubkey=/etc/pamhw/keys/X.pub]
 ```
 
-- Identifier matching is exact; `vid:pid` without serial matches a
-  serial-less stick.
-- Per-line `mode`/`verify` override the global defaults.
-- Malformed lines are skipped with a syslog warning — one typo never
-  takes the module down.
+- Identifier matching is exact after normalization (USB lowercase, BT
+  uppercase); `vid:pid` without serial matches a serial-less stick.
+  `vid` and `pid` are 4 hex digits; whitespace or control characters
+  anywhere make the line malformed.
+- Per-line `mode`/`verify` override the global defaults. In R1 only
+  `presence` can be verified: a line whose tier is `secret`/`sign`
+  denies (`PAM_AUTH_ERR`) when its device is present.
+- Malformed lines (unknown type, attribute or attribute value, bad
+  identifier or username) are skipped with a syslog warning — one typo
+  never takes the module down.
+- `#` at line start or after whitespace starts a comment.
 - ⚠ R3 secrets live in `/etc/pamhw/secrets/<user>` (salted SHA-256, 0600)
   — the plain secret only ever lives on the stick:
   `sudo pamhw-probe hash /media/me/STICK --user me` prints the line to
@@ -177,7 +186,7 @@ BT (`bt`) lines are parsed but inert until R2 ships — a `bt` line never passes
 
 | Release | Delivers | Status |
 |---|---|---|
-| R0 | This README — the spec | **this release** |
+| R0 | This README — the spec | **shipped** |
 | R1 | USB presence, sufficient/mandatory, `pamhw-probe list/add/remove`, fake-sysfs test suite (incl. not-enrolled cases) | **shipped** |
 | R2 | Bluetooth presence (`bt` lines; `bt_presence = connected\|visible` — phones drop connections to save power) | planned |
 | R3 | Secret tier: `.pamhw.sec` on the stick, salted-hash check, ro-mount machinery, `pamhw-probe hash` | planned |

@@ -57,7 +57,7 @@ static void usage(FILE *out) {
     fprintf(out, "\nOptions:\n");
     fprintf(out, "  --mine                        Show the invoking user's identity lines\n");
     fprintf(out, "  --user NAME                   Target username (root only)\n");
-    fprintf(out, "  --verify presence|secret|sign Verification method (default: presence)\n");
+    fprintf(out, "  --verify[=]presence|secret|sign  Verification method (default: presence)\n");
     fprintf(out, "  --conf PATH                   Configuration file (root only)\n");
     fprintf(out, "  --sys-root DIR                Override sysfs root (root only)\n");
     fprintf(out, "  --identities PATH             Override identities file (root only)\n");
@@ -310,6 +310,8 @@ static int cmd_add(int argc, char **argv) {
                 return 2;
             }
             verify = argv[i];
+        } else if (strncmp(argv[i], "--verify=", 9) == 0) {
+            verify = argv[i] + 9;
         } else if (strcmp(argv[i], "--conf") == 0) {
             if (++i >= argc) {
                 fprintf(stderr, "Error: --conf requires an argument\n");
