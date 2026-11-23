@@ -8,7 +8,7 @@
 #include <security/pam_modules.h>
 #include <security/pam_ext.h>
 #include <syslog.h>
-#include <string.h>
+#include <stddef.h>
 
 #include "config.h"
 #include "identities.h"
@@ -40,6 +40,21 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
     pam_get_item(pamh, PAM_TTY, (const void **)&tty);
     pam_get_item(pamh, PAM_SERVICE, (const void **)&service);
 
+    /*
+     * Two-phase local-only guard:
+     * Phase 1 (PRE-CONFIG): Check rhost/tty remote markers with empty whitelist.
+     *   Rejects remote sessions before any filesystem I/O.
+     * Phase 2 (POST-CONFIG): Apply cfg.services whitelist after config load.
+     */
+    if (!pamhw_local_only(rhost, tty, service, "")) {
+        pam_syslog(pamh, LOG_WARNING,
+                   "pam_hw: step aside (remote session): "
+                   "rhost=%s tty=%s",
+                   rhost ? rhost : "(null)",
+                   tty ? tty : "(null)");
+        return PAM_IGNORE;
+    }
+
     /* Load configuration */
     hw_config cfg;
     if (config_load("/etc/pamhw/pamhw.conf", &cfg) != 0) {
@@ -47,14 +62,12 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
         return PAM_IGNORE;
     }
 
-    /* Guard: local-only check runs FIRST, before any I/O */
+    /* Phase 2: Apply service whitelist if configured */
     if (!pamhw_local_only(rhost, tty, service, cfg.services)) {
         if (cfg.debug) {
             pam_syslog(pamh, LOG_DEBUG,
-                       "pam_hw: step aside (remote or excluded service): "
-                       "rhost=%s tty=%s service=%s",
-                       rhost ? rhost : "(null)",
-                       tty ? tty : "(null)",
+                       "pam_hw: step aside (excluded service): "
+                       "service=%s",
                        service ? service : "(null)");
         }
         return PAM_IGNORE;
