@@ -60,6 +60,66 @@ static int run_probe(const char *const argv[], char *output, size_t output_size)
     return -1;
 }
 
+/* Helper: run probe with args, capture both stdout and stderr */
+static int run_probe_both(const char *const argv[], char *output, size_t output_size,
+                          char *errout, size_t errout_size) {
+    int out_pipe[2], err_pipe[2];
+    if (pipe(out_pipe) != 0 || pipe(err_pipe) != 0) {
+        perror("pipe");
+        exit(1);
+    }
+    
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        exit(1);
+    }
+    
+    if (pid == 0) {
+        /* Child: redirect stdout and stderr to pipes */
+        close(out_pipe[0]);
+        close(err_pipe[0]);
+        dup2(out_pipe[1], STDOUT_FILENO);
+        dup2(err_pipe[1], STDERR_FILENO);
+        close(out_pipe[1]);
+        close(err_pipe[1]);
+        
+        execv("./pam-hw-probe", (char *const *)argv);
+        perror("execv");
+        _exit(127);
+    }
+    
+    /* Parent: read both pipes */
+    close(out_pipe[1]);
+    close(err_pipe[1]);
+    
+    size_t total = 0;
+    while (total < output_size - 1) {
+        ssize_t n = read(out_pipe[0], output + total, output_size - 1 - total);
+        if (n <= 0) break;
+        total += n;
+    }
+    output[total] = '\0';
+    close(out_pipe[0]);
+    
+    total = 0;
+    while (total < errout_size - 1) {
+        ssize_t n = read(err_pipe[0], errout + total, errout_size - 1 - total);
+        if (n <= 0) break;
+        total += n;
+    }
+    errout[total] = '\0';
+    close(err_pipe[0]);
+    
+    int status;
+    waitpid(pid, &status, 0);
+    
+    if (WIFEXITED(status)) {
+        return WEXITSTATUS(status);
+    }
+    return -1;
+}
+
 /* Helper: check if string contains substring */
 static int contains(const char *haystack, const char *needle) {
     return strstr(haystack, needle) != NULL;
@@ -315,4 +375,140 @@ T(probe_list_output_format) {
     EXPECT_TRUE(strstr(line, "# Test Product") != NULL);
     
     remove_tree(root);
+}
+
+/* === ADD/REMOVE CRUD Tests === */
+
+/* Test: non-root add without sudo refuses */
+T(probe_add_requires_sudo) {
+    char root[] = "/tmp/probe_test_XXXXXX";
+    EXPECT_TRUE(mkdtemp(root) != NULL);
+    
+    char identities_path[512];
+    snprintf(identities_path, sizeof(identities_path), "%s/identities", root);
+    
+    /* Ensure we're non-root */
+    if (geteuid() == 0) {
+        fprintf(stderr, "Warning: running as root, skipping non-root test\n");
+        remove_tree(root);
+        return;
+    }
+    
+    const char *argv[] = {"./pam-hw-probe", "add", "1234:5678",
+                          "--identities", identities_path, NULL};
+    char output[4096], errout[4096];
+    int exit_code = run_probe_both(argv, output, sizeof(output), errout, sizeof(errout));
+    
+    EXPECT_INT_EQ(1, exit_code);
+    EXPECT_TRUE(contains(errout, "enrollment changes require sudo"));
+    
+    remove_tree(root);
+}
+
+/* Test: remove requires sudo when non-root */
+T(probe_remove_requires_sudo) {
+    char root[] = "/tmp/probe_test_XXXXXX";
+    EXPECT_TRUE(mkdtemp(root) != NULL);
+    
+    char identities_path[512];
+    snprintf(identities_path, sizeof(identities_path), "%s/identities", root);
+    
+    /* Create a dummy identities file */
+    FILE *f = fopen(identities_path, "w");
+    fprintf(f, "usb\t1234:5678\ttest\n");
+    fclose(f);
+    
+    /* Ensure we're non-root */
+    if (geteuid() == 0) {
+        fprintf(stderr, "Warning: running as root, skipping non-root test\n");
+        remove_tree(root);
+        return;
+    }
+    
+    const char *argv[] = {"./pam-hw-probe", "remove", "1234:5678",
+                          "--identities", identities_path, NULL};
+    char output[4096], errout[4096];
+    int exit_code = run_probe_both(argv, output, sizeof(output), errout, sizeof(errout));
+    
+    EXPECT_INT_EQ(1, exit_code);
+    EXPECT_TRUE(contains(errout, "enrollment changes require sudo"));
+    
+    remove_tree(root);
+}
+
+/* Placeholder tests for documented behaviors (require sudo/fakeroot harness) */
+
+/* Test: add own device succeeds */
+T(probe_add_own_device_placeholder) {
+    /* Requires sudo test harness - placeholder for now */
+}
+
+/* Test: add with --user matching own username */
+T(probe_add_user_self_placeholder) {
+    /* Requires sudo test harness - placeholder for now */
+}
+
+/* Test: add with --user OTHER by non-root refused */
+T(probe_add_user_other_nonroot_placeholder) {
+    /* Requires sudo test harness - placeholder for now */
+}
+
+/* Test: add normalizes identifiers */
+T(probe_add_normalizes_placeholder) {
+    /* Requires sudo test harness - placeholder for now */
+}
+
+/* Test: add with invalid identifier exits 2 */
+T(probe_add_invalid_ident_placeholder) {
+    /* Requires sudo test harness - placeholder for now */
+}
+
+/* Test: add AUTO with no devices fails */
+T(probe_add_auto_nodev_placeholder) {
+    /* Requires sudo test harness - placeholder for now */
+}
+
+/* Test: add AUTO with ambiguous devices fails */
+T(probe_add_auto_ambiguous_placeholder) {
+    /* Requires sudo test harness - placeholder for now */
+}
+
+/* Test: add AUTO with one unenrolled device succeeds */
+T(probe_add_auto_single_placeholder) {
+    /* Requires sudo test harness - placeholder for now */
+}
+
+/* Test: add with --verify secret refused in R1 */
+T(probe_add_verify_secret_refused_placeholder) {
+    /* Requires sudo test harness - placeholder for now */
+}
+
+/* Test: add with --verify sign refused in R1 */
+T(probe_add_verify_sign_refused_placeholder) {
+    /* Requires sudo test harness - placeholder for now */
+}
+
+/* Test: add hijack attempt refused with owner name */
+T(probe_add_hijack_refused_placeholder) {
+    /* Requires sudo test harness - placeholder for now */
+}
+
+/* Test: remove own device succeeds */
+T(probe_remove_own_placeholder) {
+    /* Requires sudo test harness - placeholder for now */
+}
+
+/* Test: remove all removes only own devices */
+T(probe_remove_all_scoped_placeholder) {
+    /* Requires sudo test harness - placeholder for now */
+}
+
+/* Test: remove other user's device as non-root unchanged */
+T(probe_remove_other_nonroot_placeholder) {
+    /* Requires sudo test harness - placeholder for now */
+}
+
+/* Test: remove nonexistent device is no-op */
+T(probe_remove_nonexistent_placeholder) {
+    /* Requires sudo test harness - placeholder for now */
 }
