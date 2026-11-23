@@ -8,7 +8,46 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <dirent.h>
+#include <unistd.h>
 #include <errno.h>
+
+/*
+ * remove_tree: Recursively remove a directory tree (C-based, no shell-out)
+ * 
+ * Arguments:
+ *   path: Directory to remove
+ */
+static inline void remove_tree(const char *path) {
+    DIR *d;
+    struct dirent *entry;
+    char fullpath[2048];
+    struct stat statbuf;
+    
+    if (!path) return;
+    
+    d = opendir(path);
+    if (!d) return;  /* Already gone or inaccessible */
+    
+    while ((entry = readdir(d)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+        
+        snprintf(fullpath, sizeof(fullpath), "%s/%s", path, entry->d_name);
+        
+        if (stat(fullpath, &statbuf) == 0) {
+            if (S_ISDIR(statbuf.st_mode)) {
+                remove_tree(fullpath);  /* Recursive */
+            } else {
+                unlink(fullpath);
+            }
+        }
+    }
+    
+    closedir(d);
+    rmdir(path);
+}
 
 /*
  * fake_usb: Create a fake sysfs USB device tree
@@ -28,6 +67,24 @@ static inline void fake_usb(const char *root, const char *devid,
                            const char *serial, const char *product) {
     char path[512];
     FILE *f;
+    
+    /* Validate required arguments */
+    if (!root) {
+        fprintf(stderr, "fake_usb: root is NULL\n");
+        abort();
+    }
+    if (!devid) {
+        fprintf(stderr, "fake_usb: devid is NULL\n");
+        abort();
+    }
+    if (!vid) {
+        fprintf(stderr, "fake_usb: vid is NULL\n");
+        abort();
+    }
+    if (!pid) {
+        fprintf(stderr, "fake_usb: pid is NULL\n");
+        abort();
+    }
     
     /* Create device directory */
     snprintf(path, sizeof(path), "%s/%s", root, devid);
