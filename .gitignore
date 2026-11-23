@@ -1,4 +1,3 @@
-pam_bluetooth.o
 .worktrees/
 # pam-hw build artifacts
 pam_hw.so
