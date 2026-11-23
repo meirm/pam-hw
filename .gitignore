@@ -1,2 +1,6 @@
 pam_bluetooth.o
 .worktrees/
+# pam-hw build artifacts
+pam_hw.so
+pam-hw-probe
+tests/run_tests
