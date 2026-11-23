@@ -406,3 +406,94 @@ T(unknown_attribute_malformed) {
     
     unlink(path);
 }
+
+/* Test: Parse space-separated lines (spec-compliant format) */
+T(parse_space_separated) {
+    char path[] = "/tmp/identities_test_XXXXXX";
+    int fd = mkstemp(path);
+    EXPECT_TRUE(fd >= 0);
+    close(fd);
+    
+    const char *content = 
+        "usb     046d:c52b:123456     user1     verify=pin     mode=always\n"
+        "bt     AA:BB:CC:DD:EE:FF     user2\n"
+        "usb     1234:5678     user3     pubkey=ABCD1234\n";
+    
+    write_temp_file(path, content);
+    
+    hw_identity ids[10];
+    int count = 0;
+    int ret = identities_load(path, ids, 10, &count);
+    
+    EXPECT_INT_EQ(0, ret);
+    EXPECT_INT_EQ(3, count);
+    
+    /* Should parse identically to tab-separated */
+    EXPECT_INT_EQ(HW_USB, ids[0].type);
+    EXPECT_STR_EQ("046d:c52b:123456", ids[0].ident);
+    EXPECT_STR_EQ("user1", ids[0].user);
+    EXPECT_STR_EQ("pin", ids[0].verify);
+    EXPECT_STR_EQ("always", ids[0].mode);
+    
+    EXPECT_INT_EQ(HW_BT, ids[1].type);
+    EXPECT_STR_EQ("AA:BB:CC:DD:EE:FF", ids[1].ident);
+    EXPECT_STR_EQ("user2", ids[1].user);
+    
+    EXPECT_INT_EQ(HW_USB, ids[2].type);
+    EXPECT_STR_EQ("1234:5678", ids[2].ident);
+    EXPECT_STR_EQ("user3", ids[2].user);
+    EXPECT_STR_EQ("ABCD1234", ids[2].pubkey);
+    
+    unlink(path);
+}
+
+/* Test: Parse mixed tab/space lines */
+T(parse_mixed_whitespace) {
+    char path[] = "/tmp/identities_test_XXXXXX";
+    int fd = mkstemp(path);
+    EXPECT_TRUE(fd >= 0);
+    close(fd);
+    
+    const char *content = 
+        "usb\t046d:c52b   user1\tverify=pin\n"
+        "bt  \tAA:BB:CC:DD:EE:FF\tuser2\n";
+    
+    write_temp_file(path, content);
+    
+    hw_identity ids[10];
+    int count = 0;
+    int ret = identities_load(path, ids, 10, &count);
+    
+    EXPECT_INT_EQ(0, ret);
+    EXPECT_INT_EQ(2, count);
+    
+    EXPECT_STR_EQ("046d:c52b", ids[0].ident);
+    EXPECT_STR_EQ("user1", ids[0].user);
+    EXPECT_STR_EQ("pin", ids[0].verify);
+    
+    EXPECT_STR_EQ("AA:BB:CC:DD:EE:FF", ids[1].ident);
+    EXPECT_STR_EQ("user2", ids[1].user);
+    
+    unlink(path);
+}
+
+/* Test: root calling remove all only removes root's own lines */
+T(remove_all_root_scoped) {
+    hw_identity ids[10];
+    int count = 4;
+    ids[0] = (hw_identity){ HW_USB, "046d:c52b", "root", "", "", "", 1 };
+    ids[1] = (hw_identity){ HW_USB, "1234:5678", "alice", "", "", "", 2 };
+    ids[2] = (hw_identity){ HW_USB, "aaaa:bbbb", "root", "", "", "", 3 };
+    ids[3] = (hw_identity){ HW_BT, "AA:BB:CC:DD:EE:FF", "bob", "", "", "", 4 };
+    
+    int removed = identities_remove(ids, count, "all", "root", 1);
+    
+    /* Should remove only root's 2 lines */
+    EXPECT_INT_EQ(2, removed);
+    
+    /* Alice and Bob's lines should survive */
+    EXPECT_STR_EQ("alice", ids[0].user);
+    EXPECT_STR_EQ("1234:5678", ids[0].ident);
+    EXPECT_STR_EQ("bob", ids[1].user);
+    EXPECT_STR_EQ("AA:BB:CC:DD:EE:FF", ids[1].ident);
+}

@@ -142,18 +142,25 @@ int identities_load(const char *path, hw_identity *out, int max, int *count) {
         char type_str[32], ident[128], user[64];
         type_str[0] = ident[0] = user[0] = '\0';
         
-        /* Tokenize by tabs */
+        /* Tokenize by whitespace (spaces or tabs) */
         char *tokens[32];
         int ntokens = 0;
         char *p = line;
         while (*p && ntokens < 32) {
+            /* Skip leading whitespace */
+            while (*p && isspace((unsigned char)*p)) p++;
+            if (!*p) break;
+            
+            /* Mark token start */
             tokens[ntokens++] = p;
-            char *tab = strchr(p, '\t');
-            if (tab) {
-                *tab = '\0';
-                p = tab + 1;
-            } else {
-                break;
+            
+            /* Find end of token (next whitespace) */
+            while (*p && !isspace((unsigned char)*p)) p++;
+            
+            /* Null-terminate token if not at end */
+            if (*p) {
+                *p = '\0';
+                p++;
             }
         }
         
@@ -269,8 +276,8 @@ int identities_remove(hw_identity *l, int n, const char *ident_or_all,
         int should_remove = 0;
         
         if (strcmp(ident_or_all, "all") == 0) {
-            /* Remove all own identities */
-            if (is_root || strcmp(l[i].user, invoker) == 0) {
+            /* Remove all own identities (always invoker-scoped, even for root) */
+            if (strcmp(l[i].user, invoker) == 0) {
                 should_remove = 1;
             }
         } else {
