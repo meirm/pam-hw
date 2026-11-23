@@ -30,11 +30,12 @@ static int run_probe(const char *const argv[], char *output, size_t output_size)
     
     if (pid == 0) {
         /* Child: redirect stdout to pipe, exec probe */
+        unsetenv("SUDO_UID");
         close(pipefd[0]);
         dup2(pipefd[1], STDOUT_FILENO);
         close(pipefd[1]);
         
-        execv("./pam-hw-probe", (char *const *)argv);
+        execv(argv[0], (char *const *)argv);
         perror("execv");
         _exit(127);
     }
@@ -77,6 +78,7 @@ static int run_probe_both(const char *const argv[], char *output, size_t output_
     
     if (pid == 0) {
         /* Child: redirect stdout and stderr to pipes */
+        unsetenv("SUDO_UID");
         close(out_pipe[0]);
         close(err_pipe[0]);
         dup2(out_pipe[1], STDOUT_FILENO);
@@ -84,7 +86,7 @@ static int run_probe_both(const char *const argv[], char *output, size_t output_
         close(out_pipe[1]);
         close(err_pipe[1]);
         
-        execv("./pam-hw-probe", (char *const *)argv);
+        execv(argv[0], (char *const *)argv);
         perror("execv");
         _exit(127);
     }
@@ -240,7 +242,7 @@ T(probe_list_basic) {
     fclose(f);
     
     /* Run probe */
-    const char *argv[] = {"./pam-hw-probe", "list", "--conf", conf_path, NULL};
+    const char *argv[] = {"./pam-hw-probe-test", "list", "--conf", conf_path, NULL};
     char output[4096];
     int exit_code = run_probe(argv, output, sizeof(output));
     
@@ -296,7 +298,7 @@ T(probe_list_enrolled) {
     fclose(f);
     
     /* Run probe */
-    const char *argv[] = {"./pam-hw-probe", "list", "--conf", conf_path, 
+    const char *argv[] = {"./pam-hw-probe-test", "list", "--conf", conf_path, 
                           "--identities", identities_path, NULL};
     char output[4096];
     int exit_code = run_probe(argv, output, sizeof(output));
@@ -361,7 +363,7 @@ T(probe_list_mine) {
     fclose(f);
     
     /* Run probe with --mine */
-    const char *argv[] = {"./pam-hw-probe", "list", "--mine", "--conf", conf_path,
+    const char *argv[] = {"./pam-hw-probe-test", "list", "--mine", "--conf", conf_path,
                           "--identities", identities_path, NULL};
     char output[4096];
     int exit_code = run_probe(argv, output, sizeof(output));
@@ -405,7 +407,7 @@ T(probe_list_empty) {
     fprintf(f, "sys_root=%s\n", sysfs);
     fclose(f);
     
-    const char *argv[] = {"./pam-hw-probe", "list", "--conf", conf_path, NULL};
+    const char *argv[] = {"./pam-hw-probe-test", "list", "--conf", conf_path, NULL};
     char output[4096];
     int exit_code = run_probe(argv, output, sizeof(output));
     
@@ -454,7 +456,7 @@ T(probe_list_output_format) {
     fprintf(f, "sys_root=%s\n", sysfs);
     fclose(f);
     
-    const char *argv[] = {"./pam-hw-probe", "list", "--conf", conf_path, NULL};
+    const char *argv[] = {"./pam-hw-probe-test", "list", "--conf", conf_path, NULL};
     char output[4096];
     int exit_code = run_probe(argv, output, sizeof(output));
     
@@ -1212,4 +1214,23 @@ T(probe_sudo_uid_large_not_root) {
     EXPECT_TRUE(contains(errout, "could not determine invoker identity"));
     EXPECT_TRUE(fopen(identities_path, "r") == NULL);
     remove_tree(root);
+}
+
+/* === Path overrides (C2): honored only for root or the test build === */
+
+/* Test: production probe refuses --conf/--identities/--sys-root from non-root */
+T(probe_path_overrides_refused_nonroot) {
+    if (getuid() == 0) {
+        fprintf(stderr, "Warning: running as root, skipping non-root test\n");
+        return;
+    }
+    const char *flags[] = {"--conf", "--identities", "--sys-root", NULL};
+    for (int i = 0; flags[i]; i++) {
+        const char *argv[] = {"./pam-hw-probe", "list", flags[i], "/etc/shadow", NULL};
+        char output[4096], errout[4096];
+        int exit_code = run_probe_both(argv, output, sizeof(output), errout, sizeof(errout));
+        EXPECT_INT_EQ(1, exit_code);
+        EXPECT_TRUE(contains(errout, "only honored for root"));
+        EXPECT_INT_EQ(0, strlen(output));
+    }
 }

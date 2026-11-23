@@ -58,9 +58,9 @@ static void usage(FILE *out) {
     fprintf(out, "  --mine                        Show only devices enrolled by current user\n");
     fprintf(out, "  --user NAME                   Target username (root only)\n");
     fprintf(out, "  --verify presence|secret|sign Verification method (default: presence)\n");
-    fprintf(out, "  --conf PATH                   Configuration file\n");
-    fprintf(out, "  --sys-root DIR                Override sysfs root\n");
-    fprintf(out, "  --identities PATH             Override identities file\n");
+    fprintf(out, "  --conf PATH                   Configuration file (root only)\n");
+    fprintf(out, "  --sys-root DIR                Override sysfs root (root only)\n");
+    fprintf(out, "  --identities PATH             Override identities file (root only)\n");
 }
 
 /* Helper: get invoker username from uid */
@@ -122,11 +122,30 @@ static int resolve_invoker(char *username, size_t size, int *is_root) {
     return 0;
 }
 
+/*
+ * Path overrides (--conf, --identities, --sys-root) redirect root-privileged
+ * reads and the atomic identities rewrite, so outside the test-instrumented
+ * build they are honored only when the invoker itself is root.
+ * Returns 0 if allowed, -1 (message printed) if refused.
+ */
+static int check_path_override(const char *flag) {
+    if (!flag) return 0;
+#ifdef PAMHW_TEST
+    return 0;
+#else
+    uid_t uid;
+    if (resolve_invoker_uid(&uid) == 0 && uid == 0) return 0;
+    fprintf(stderr, "Error: %s is only honored for root\n", flag);
+    return -1;
+#endif
+}
+
 /* Command: list */
 static int cmd_list(int argc, char **argv) {
     const char *conf_path = "/etc/pamhw/pamhw.conf";
     const char *sys_root_override = NULL;
     const char *identities_path = "/etc/pamhw/identities";
+    const char *override_flag = NULL;
     int mine_flag = 0;
     int i;
     
@@ -141,6 +160,7 @@ static int cmd_list(int argc, char **argv) {
                 return 2;
             }
             conf_path = argv[i];
+            override_flag = "--conf";
         } else if (strcmp(argv[i], "--sys-root") == 0) {
             if (++i >= argc) {
                 fprintf(stderr, "Error: --sys-root requires an argument\n");
@@ -148,6 +168,7 @@ static int cmd_list(int argc, char **argv) {
                 return 2;
             }
             sys_root_override = argv[i];
+            override_flag = "--sys-root";
         } else if (strcmp(argv[i], "--identities") == 0) {
             if (++i >= argc) {
                 fprintf(stderr, "Error: --identities requires an argument\n");
@@ -155,12 +176,15 @@ static int cmd_list(int argc, char **argv) {
                 return 2;
             }
             identities_path = argv[i];
+            override_flag = "--identities";
         } else {
             fprintf(stderr, "Error: unknown option: %s\n", argv[i]);
             usage(stderr);
             return 2;
         }
     }
+    
+    if (check_path_override(override_flag) != 0) return 1;
     
     /* Load configuration */
     hw_config cfg;
@@ -267,6 +291,7 @@ static int cmd_add(int argc, char **argv) {
     const char *identities_path = "/etc/pamhw/identities";
     const char *target_user = NULL;
     const char *verify = "presence";
+    const char *override_flag = NULL;
     int i;
     
     /* Parse options */
@@ -289,23 +314,28 @@ static int cmd_add(int argc, char **argv) {
                 return 2;
             }
             conf_path = argv[i];
+            override_flag = "--conf";
         } else if (strcmp(argv[i], "--sys-root") == 0) {
             if (++i >= argc) {
                 fprintf(stderr, "Error: --sys-root requires an argument\n");
                 return 2;
             }
             sys_root_override = argv[i];
+            override_flag = "--sys-root";
         } else if (strcmp(argv[i], "--identities") == 0) {
             if (++i >= argc) {
                 fprintf(stderr, "Error: --identities requires an argument\n");
                 return 2;
             }
             identities_path = argv[i];
+            override_flag = "--identities";
         } else {
             fprintf(stderr, "Error: unknown option: %s\n", argv[i]);
             return 2;
         }
     }
+    
+    if (check_path_override(override_flag) != 0) return 1;
     
     /* R1 tier limit: only presence accepted */
     if (strcmp(verify, "presence") != 0) {
@@ -462,6 +492,7 @@ static int cmd_remove(int argc, char **argv) {
     
     const char *ident_arg = argv[2];
     const char *identities_path = "/etc/pamhw/identities";
+    const char *override_flag = NULL;
     int i;
     
     /* Parse options */
@@ -472,11 +503,14 @@ static int cmd_remove(int argc, char **argv) {
                 return 2;
             }
             identities_path = argv[i];
+            override_flag = "--identities";
         } else {
             fprintf(stderr, "Error: unknown option: %s\n", argv[i]);
             return 2;
         }
     }
+    
+    if (check_path_override(override_flag) != 0) return 1;
     
     /* Resolve invoker identity */
     char invoker[64];
