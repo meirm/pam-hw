@@ -141,6 +141,7 @@ static int run_probe_test_env(const char *const argv[], char *output, size_t out
         if (euid_str) setenv("PAMHW_TEST_EUID", euid_str, 1);
         if (uid_str) setenv("PAMHW_TEST_UID", uid_str, 1);
         if (sudo_uid_str) setenv("SUDO_UID", sudo_uid_str, 1);
+        else unsetenv("SUDO_UID");
         
         close(out_pipe[0]);
         close(err_pipe[0]);
@@ -547,12 +548,12 @@ T(probe_add_own_device) {
     char identities_path[512];
     snprintf(identities_path, sizeof(identities_path), "%s/identities", root);
     
-    /* Simulate: EUID=0 (passes sudo guard), UID=1000 (invoker alice) */
+    /* Simulate real sudo: EUID=0, UID=0, SUDO_UID=1000 (invoker) */
     const char *argv[] = {"./pam-hw-probe-test", "add", "1234:5678",
                           "--identities", identities_path, NULL};
     char output[4096], errout[4096];
     int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
-                                       "0", "1000", NULL);
+                                       "0", "0", "1000");
     
     EXPECT_INT_EQ(0, exit_code);
     
@@ -581,12 +582,12 @@ T(probe_add_user_self) {
         return;
     }
     
-    /* Simulate: EUID=0, UID=1000, --user <actual_username> */
+    /* Simulate real sudo: EUID=0, UID=0, SUDO_UID=1000, --user <actual_username> */
     const char *argv[] = {"./pam-hw-probe-test", "add", "1234:5678",
                           "--user", username, "--identities", identities_path, NULL};
     char output[4096], errout[4096];
     int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
-                                       "0", "1000", NULL);
+                                       "0", "0", "1000");
     
     EXPECT_INT_EQ(0, exit_code);
     
@@ -614,12 +615,12 @@ T(probe_add_user_other_nonroot) {
         return;
     }
     
-    /* Simulate: EUID=0 (passes sudo), UID=1000 (invoker), --user root (not own) */
+    /* Simulate real sudo: EUID=0, UID=0, SUDO_UID=1000 (invoker), --user root (not own) */
     const char *argv[] = {"./pam-hw-probe-test", "add", "1234:5678",
                           "--user", "root", "--identities", identities_path, NULL};
     char output[4096], errout[4096];
     int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
-                                       "0", "1000", NULL);
+                                       "0", "0", "1000");
     
     EXPECT_INT_EQ(1, exit_code);
     EXPECT_TRUE(contains(errout, "non-root users can only enroll their own devices"));
@@ -675,7 +676,7 @@ T(probe_add_normalizes) {
                           "--identities", identities_path, NULL};
     char output[4096], errout[4096];
     int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
-                                       "0", "1000", NULL);
+                                       "0", "0", "1000");
     
     EXPECT_INT_EQ(0, exit_code);
     
@@ -701,7 +702,7 @@ T(probe_add_invalid_ident) {
                           "--identities", identities_path, NULL};
     char output[4096], errout[4096];
     int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
-                                       "0", "1000", NULL);
+                                       "0", "0", "1000");
     
     EXPECT_INT_EQ(2, exit_code);
     EXPECT_TRUE(contains(errout, "invalid identifier format"));
@@ -745,7 +746,7 @@ T(probe_add_auto_nodev) {
                           "--conf", conf_path, "--identities", identities_path, NULL};
     char output[4096], errout[4096];
     int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
-                                       "0", "1000", NULL);
+                                       "0", "0", "1000");
     
     EXPECT_INT_EQ(1, exit_code);
     EXPECT_TRUE(contains(errout, "AUTO requires at least one unenrolled device"));
@@ -792,7 +793,7 @@ T(probe_add_auto_ambiguous) {
                           "--conf", conf_path, "--identities", identities_path, NULL};
     char output[4096], errout[4096];
     int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
-                                       "0", "1000", NULL);
+                                       "0", "0", "1000");
     
     EXPECT_INT_EQ(1, exit_code);
     EXPECT_TRUE(contains(errout, "AUTO requires exactly one unenrolled device, found 2"));
@@ -840,7 +841,7 @@ T(probe_add_auto_single) {
                           "--conf", conf_path, "--identities", identities_path, NULL};
     char output[4096], errout[4096];
     int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
-                                       "0", "1000", NULL);
+                                       "0", "0", "1000");
     
     EXPECT_INT_EQ(0, exit_code);
     
@@ -907,12 +908,12 @@ T(probe_add_hijack_refused) {
     fprintf(f, "usb\t1234:5678\towner1\n");
     fclose(f);
     
-    /* Try to enroll same device as different user (UID=1000) */
+    /* Try to enroll same device as different user (sudo, SUDO_UID=1000) */
     const char *argv[] = {"./pam-hw-probe-test", "add", "1234:5678",
                           "--identities", identities_path, NULL};
     char output[4096], errout[4096];
     int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
-                                       "0", "1000", NULL);
+                                       "0", "0", "1000");
     
     EXPECT_INT_EQ(1, exit_code);
     EXPECT_TRUE(contains(errout, "already enrolled by user owner1"));
@@ -946,12 +947,12 @@ T(probe_remove_own) {
     fprintf(f, "usb\t1234:5678\t%s\n", username);
     fclose(f);
     
-    /* Remove as that user (UID=1000) */
+    /* Remove as that user (sudo, SUDO_UID=1000) */
     const char *argv[] = {"./pam-hw-probe-test", "remove", "1234:5678",
                           "--identities", identities_path, NULL};
     char output[4096], errout[4096];
     int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
-                                       "0", "1000", NULL);
+                                       "0", "0", "1000");
     
     EXPECT_INT_EQ(0, exit_code);
     
@@ -987,12 +988,12 @@ T(probe_remove_all_scoped) {
     fprintf(f, "usb\t3333:3333\tother_user\n");
     fclose(f);
     
-    /* Remove all as invoker (UID=1000) */
+    /* Remove all as invoker (sudo, SUDO_UID=1000) */
     const char *argv[] = {"./pam-hw-probe-test", "remove", "all",
                           "--identities", identities_path, NULL};
     char output[4096], errout[4096];
     int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
-                                       "0", "1000", NULL);
+                                       "0", "0", "1000");
     
     EXPECT_INT_EQ(0, exit_code);
     
@@ -1020,12 +1021,12 @@ T(probe_remove_other_nonroot) {
     fprintf(f, "usb\t1234:5678\tother_owner\n");
     fclose(f);
     
-    /* Try to remove other's device as non-root user (UID=1000) */
+    /* Try to remove other's device as non-root user (sudo, SUDO_UID=1000) */
     const char *argv[] = {"./pam-hw-probe-test", "remove", "1234:5678",
                           "--identities", identities_path, NULL};
     char output[4096], errout[4096];
     int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
-                                       "0", "1000", NULL);
+                                       "0", "0", "1000");
     
     EXPECT_INT_EQ(0, exit_code);  /* No error, but nothing removed */
     
@@ -1062,7 +1063,7 @@ T(probe_remove_nonexistent) {
                           "--identities", identities_path, NULL};
     char output[4096], errout[4096];
     int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
-                                       "0", "1000", NULL);
+                                       "0", "0", "1000");
     
     EXPECT_INT_EQ(0, exit_code);  /* No error */
     
@@ -1071,5 +1072,144 @@ T(probe_remove_nonexistent) {
     EXPECT_INT_EQ(0, read_file(identities_path, file_content, sizeof(file_content)));
     EXPECT_TRUE(contains(file_content, "1234:5678"));
     
+    remove_tree(root);
+}
+
+/* === Real-sudo identity model (C1): UID=0 + SUDO_UID=<invoker> === */
+
+/* Test: under sudo (uid 0, SUDO_UID=1000) --user root is refused */
+T(probe_sudo_user_other_refused) {
+    char root[] = "/tmp/probe_test_XXXXXX";
+    EXPECT_TRUE(mkdtemp(root) != NULL);
+    char identities_path[512];
+    snprintf(identities_path, sizeof(identities_path), "%s/identities", root);
+    if (!get_test_username(1000)) {
+        fprintf(stderr, "Warning: UID 1000 has no username, skipping test\n");
+        remove_tree(root);
+        return;
+    }
+    const char *argv[] = {"./pam-hw-probe-test", "add", "1234:5678",
+                          "--user", "root", "--identities", identities_path, NULL};
+    char output[4096], errout[4096];
+    int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
+                                       "0", "0", "1000");
+    EXPECT_INT_EQ(1, exit_code);
+    EXPECT_TRUE(contains(errout, "non-root users can only enroll their own devices"));
+    EXPECT_TRUE(fopen(identities_path, "r") == NULL);
+    remove_tree(root);
+}
+
+/* Test: under sudo (uid 0, SUDO_UID=1000) claiming another user's device is refused */
+T(probe_sudo_hijack_refused) {
+    char root[] = "/tmp/probe_test_XXXXXX";
+    EXPECT_TRUE(mkdtemp(root) != NULL);
+    char identities_path[512];
+    snprintf(identities_path, sizeof(identities_path), "%s/identities", root);
+    if (!get_test_username(1000)) {
+        fprintf(stderr, "Warning: UID 1000 has no username, skipping test\n");
+        remove_tree(root);
+        return;
+    }
+    FILE *f = fopen(identities_path, "w");
+    fprintf(f, "usb\t1234:5678\towner1\n");
+    fclose(f);
+    const char *argv[] = {"./pam-hw-probe-test", "add", "1234:5678",
+                          "--identities", identities_path, NULL};
+    char output[4096], errout[4096];
+    int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
+                                       "0", "0", "1000");
+    EXPECT_INT_EQ(1, exit_code);
+    EXPECT_TRUE(contains(errout, "already enrolled by user owner1"));
+    char file_content[4096];
+    EXPECT_INT_EQ(0, read_file(identities_path, file_content, sizeof(file_content)));
+    EXPECT_TRUE(contains(file_content, "owner1"));
+    remove_tree(root);
+}
+
+/* Test: under sudo (uid 0, SUDO_UID=1000) removing another user's line is refused */
+T(probe_sudo_remove_other_refused) {
+    char root[] = "/tmp/probe_test_XXXXXX";
+    EXPECT_TRUE(mkdtemp(root) != NULL);
+    char identities_path[512];
+    snprintf(identities_path, sizeof(identities_path), "%s/identities", root);
+    if (!get_test_username(1000)) {
+        fprintf(stderr, "Warning: UID 1000 has no username, skipping test\n");
+        remove_tree(root);
+        return;
+    }
+    FILE *f = fopen(identities_path, "w");
+    fprintf(f, "usb\t1234:5678\tother_owner\n");
+    fclose(f);
+    const char *argv[] = {"./pam-hw-probe-test", "remove", "1234:5678",
+                          "--identities", identities_path, NULL};
+    char output[4096], errout[4096];
+    int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
+                                       "0", "0", "1000");
+    EXPECT_INT_EQ(0, exit_code);
+    char file_content[4096];
+    EXPECT_INT_EQ(0, read_file(identities_path, file_content, sizeof(file_content)));
+    EXPECT_TRUE(contains(file_content, "1234:5678"));
+    EXPECT_TRUE(contains(file_content, "other_owner"));
+    remove_tree(root);
+}
+
+/* Test: uid 0 with no SUDO_UID is root and may enroll for another user */
+T(probe_root_without_sudo_uid) {
+    char root[] = "/tmp/probe_test_XXXXXX";
+    EXPECT_TRUE(mkdtemp(root) != NULL);
+    char identities_path[512];
+    snprintf(identities_path, sizeof(identities_path), "%s/identities", root);
+    const char *argv[] = {"./pam-hw-probe-test", "add", "1234:5678",
+                          "--user", "nobody", "--identities", identities_path, NULL};
+    char output[4096], errout[4096];
+    int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
+                                       "0", "0", NULL);
+    EXPECT_INT_EQ(0, exit_code);
+    char file_content[4096];
+    EXPECT_INT_EQ(0, read_file(identities_path, file_content, sizeof(file_content)));
+    EXPECT_TRUE(contains(file_content, "nobody"));
+    remove_tree(root);
+}
+
+/* Test: malformed SUDO_UID is refused, never a silent fallback to root */
+T(probe_sudo_uid_malformed_refused) {
+    const char *bad[] = {"abc", "", "-1", "1000x", " 1000", "4294967296", NULL};
+    for (int b = 0; bad[b]; b++) {
+        char root[] = "/tmp/probe_test_XXXXXX";
+        EXPECT_TRUE(mkdtemp(root) != NULL);
+        char identities_path[512];
+        snprintf(identities_path, sizeof(identities_path), "%s/identities", root);
+        const char *argv[] = {"./pam-hw-probe-test", "add", "1234:5678",
+                              "--user", "root", "--identities", identities_path, NULL};
+        char output[4096], errout[4096];
+        int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
+                                           "0", "0", bad[b]);
+        EXPECT_INT_EQ(1, exit_code);
+        EXPECT_TRUE(contains(errout, "invalid SUDO_UID"));
+        EXPECT_TRUE(fopen(identities_path, "r") == NULL);
+        remove_tree(root);
+    }
+}
+
+/* Test: SUDO_UID above 65535 is a real (non-root) invoker, not a root fallback */
+T(probe_sudo_uid_large_not_root) {
+    char root[] = "/tmp/probe_test_XXXXXX";
+    EXPECT_TRUE(mkdtemp(root) != NULL);
+    char identities_path[512];
+    snprintf(identities_path, sizeof(identities_path), "%s/identities", root);
+    if (get_test_username(4000000000u)) {
+        fprintf(stderr, "Warning: UID 4000000000 exists, skipping test\n");
+        remove_tree(root);
+        return;
+    }
+    const char *argv[] = {"./pam-hw-probe-test", "add", "1234:5678",
+                          "--user", "root", "--identities", identities_path, NULL};
+    char output[4096], errout[4096];
+    int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
+                                       "0", "0", "4000000000");
+    /* No passwd entry for that uid: must fail, never enroll as root */
+    EXPECT_INT_EQ(1, exit_code);
+    EXPECT_TRUE(contains(errout, "could not determine invoker identity"));
+    EXPECT_TRUE(fopen(identities_path, "r") == NULL);
     remove_tree(root);
 }

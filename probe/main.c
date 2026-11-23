@@ -13,6 +13,7 @@
 #include <syslog.h>
 #include <errno.h>
 #include <ctype.h>
+#include <stdint.h>
 #include "../src/usb_detect.h"
 #include "../src/config.h"
 #include "../src/identities.h"
@@ -70,28 +71,55 @@ static int get_username(uid_t uid, char *buf, size_t size) {
     return 0;
 }
 
-/* Helper: resolve invoker identity (SUDO_UID if set, else real uid) */
+/*
+ * Helper: resolve the invoking uid. Under sudo the real uid is 0, so the
+ * invoker comes from SUDO_UID when present; otherwise the real uid.
+ * SUDO_UID must be plain decimal digits within uid_t range; anything else
+ * is an error (never a silent fallback to the real uid, which is root).
+ * Returns 0 on success, -1 on malformed SUDO_UID.
+ */
+static int resolve_invoker_uid(uid_t *uid) {
+    const char *sudo_uid_str = getenv("SUDO_UID");
+
+    if (!sudo_uid_str) {
+        *uid = test_getuid();
+        return 0;
+    }
+
+    if (*sudo_uid_str == '\0') return -1;
+    for (const char *p = sudo_uid_str; *p; p++) {
+        if (!isdigit((unsigned char)*p)) return -1;
+    }
+
+    errno = 0;
+    char *endptr;
+    unsigned long long parsed = strtoull(sudo_uid_str, &endptr, 10);
+    if (errno != 0 || *endptr != '\0' || parsed > UINT32_MAX) return -1;
+
+    *uid = (uid_t)parsed;
+    return 0;
+}
+
+/*
+ * Helper: resolve invoker identity. is_root is derived from the same
+ * invoking uid that names the invoker, so every self-service limit
+ * applies under sudo. Returns 0 on success, -1 on error (message printed).
+ */
 static int resolve_invoker(char *username, size_t size, int *is_root) {
     uid_t uid;
-    const char *sudo_uid_str = getenv("SUDO_UID");
-    
-    /* Root status is ONLY based on real uid, not SUDO_UID */
-    *is_root = (test_getuid() == 0);
-    
-    /* Invoker username comes from SUDO_UID if present, else real uid */
-    if (sudo_uid_str && *sudo_uid_str) {
-        char *endptr;
-        long parsed = strtol(sudo_uid_str, &endptr, 10);
-        if (*endptr == '\0' && parsed >= 0 && parsed <= 65535) {
-            uid = (uid_t)parsed;
-        } else {
-            uid = test_getuid();
-        }
-    } else {
-        uid = test_getuid();
+
+    if (resolve_invoker_uid(&uid) != 0) {
+        fprintf(stderr, "Error: invalid SUDO_UID\n");
+        return -1;
     }
-    
-    return get_username(uid, username, size);
+
+    *is_root = (uid == 0);
+
+    if (get_username(uid, username, size) != 0) {
+        fprintf(stderr, "Error: could not determine invoker identity\n");
+        return -1;
+    }
+    return 0;
 }
 
 /* Command: list */
@@ -289,7 +317,6 @@ static int cmd_add(int argc, char **argv) {
     char invoker[64];
     int is_root;
     if (resolve_invoker(invoker, sizeof(invoker), &is_root) != 0) {
-        fprintf(stderr, "Error: could not determine invoker identity\n");
         return 1;
     }
     
@@ -455,7 +482,6 @@ static int cmd_remove(int argc, char **argv) {
     char invoker[64];
     int is_root;
     if (resolve_invoker(invoker, sizeof(invoker), &is_root) != 0) {
-        fprintf(stderr, "Error: could not determine invoker identity\n");
         return 1;
     }
     
