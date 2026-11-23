@@ -70,16 +70,25 @@ int pamhw_local_only(const char *rhost, const char *tty,
 }
 
 /* Helper: Evaluate single line */
-static hw_line_result evaluate_line(const hw_identity *line,
+static hw_line_result evaluate_line(const hw_identity *line, const char *global_verify,
                                    const hw_usb_device *devs, int ndevs) {
     /* HW_BT lines return IGNORE in R1 */
     if (line->type == HW_BT) {
         return HW_RES_IGNORE;
     }
     
+    /* Effective tier: line verify=, else global verify, else presence */
+    const char *verify = line->verify[0] ? line->verify
+                       : (global_verify && global_verify[0]) ? global_verify
+                       : "presence";
+    
     /* HW_USB: check if device present */
     for (int i = 0; i < ndevs; i++) {
         if (strcmp(line->ident, devs[i].ident) == 0) {
+            /* R1 can only verify presence: any stronger tier fails closed */
+            if (strcmp(verify, "presence") != 0) {
+                return HW_RES_DENY;
+            }
             return HW_RES_PASS;  /* Device present */
         }
     }
@@ -103,7 +112,7 @@ int pamhw_evaluate(const hw_config *cfg, const hw_identity *l, int n,
         if (strcmp(l[i].user, user) != 0) continue;
         
         user_lines++;
-        hw_line_result res = evaluate_line(&l[i], devs, ndevs);
+        hw_line_result res = evaluate_line(&l[i], cfg->verify, devs, ndevs);
         
         /* Determine line mode (use per-line mode if set, else global) */
         const char *line_mode = (l[i].mode[0] != '\0') ? l[i].mode : effective_mode;

@@ -25,7 +25,7 @@ T(parse_valid_lines) {
     close(fd);
     
     const char *content = 
-        "usb\t046d:c52b:123456\tuser1\tverify=pin\tmode=always\n"
+        "usb\t046d:c52b:123456\tuser1\tverify=secret\tmode=mandatory\n"
         "bt\tAA:BB:CC:DD:EE:FF\tuser2\n"
         "usb\t1234:5678\tuser3\tpubkey=ABCD1234\n";
     
@@ -42,8 +42,8 @@ T(parse_valid_lines) {
     EXPECT_INT_EQ(HW_USB, ids[0].type);
     EXPECT_STR_EQ("046d:c52b:123456", ids[0].ident);
     EXPECT_STR_EQ("user1", ids[0].user);
-    EXPECT_STR_EQ("pin", ids[0].verify);
-    EXPECT_STR_EQ("always", ids[0].mode);
+    EXPECT_STR_EQ("secret", ids[0].verify);
+    EXPECT_STR_EQ("mandatory", ids[0].mode);
     EXPECT_INT_EQ(1, ids[0].line_no);
     
     /* Second identity: BT without attributes */
@@ -400,9 +400,9 @@ T(save_load_roundtrip) {
     close(fd);
     
     hw_identity original[3] = {
-        { HW_USB, "046d:c52b:123456", "user1", "pin", "always", "", 1 },
+        { HW_USB, "046d:c52b:123456", "user1", "secret", "mandatory", "", 1 },
         { HW_BT, "AA:BB:CC:DD:EE:FF", "user2", "", "", "", 2 },
-        { HW_USB, "1234:5678", "user3", "", "conditional", "PUBKEY123", 3 }
+        { HW_USB, "1234:5678", "user3", "", "sufficient", "PUBKEY123", 3 }
     };
     
     int ret = identities_save(path, original, 3);
@@ -463,7 +463,7 @@ T(parse_space_separated) {
     close(fd);
     
     const char *content = 
-        "usb     046d:c52b:123456     user1     verify=pin     mode=always\n"
+        "usb     046d:c52b:123456     user1     verify=secret     mode=mandatory\n"
         "bt     AA:BB:CC:DD:EE:FF     user2\n"
         "usb     1234:5678     user3     pubkey=ABCD1234\n";
     
@@ -480,8 +480,8 @@ T(parse_space_separated) {
     EXPECT_INT_EQ(HW_USB, ids[0].type);
     EXPECT_STR_EQ("046d:c52b:123456", ids[0].ident);
     EXPECT_STR_EQ("user1", ids[0].user);
-    EXPECT_STR_EQ("pin", ids[0].verify);
-    EXPECT_STR_EQ("always", ids[0].mode);
+    EXPECT_STR_EQ("secret", ids[0].verify);
+    EXPECT_STR_EQ("mandatory", ids[0].mode);
     
     EXPECT_INT_EQ(HW_BT, ids[1].type);
     EXPECT_STR_EQ("AA:BB:CC:DD:EE:FF", ids[1].ident);
@@ -503,7 +503,7 @@ T(parse_mixed_whitespace) {
     close(fd);
     
     const char *content = 
-        "usb\t046d:c52b   user1\tverify=pin\n"
+        "usb\t046d:c52b   user1\tverify=presence\n"
         "bt  \tAA:BB:CC:DD:EE:FF\tuser2\n";
     
     write_temp_file(path, content);
@@ -517,7 +517,7 @@ T(parse_mixed_whitespace) {
     
     EXPECT_STR_EQ("046d:c52b", ids[0].ident);
     EXPECT_STR_EQ("user1", ids[0].user);
-    EXPECT_STR_EQ("pin", ids[0].verify);
+    EXPECT_STR_EQ("presence", ids[0].verify);
     
     EXPECT_STR_EQ("AA:BB:CC:DD:EE:FF", ids[1].ident);
     EXPECT_STR_EQ("user2", ids[1].user);
@@ -697,4 +697,35 @@ T(remove_normalizes_argument) {
     EXPECT_INT_EQ(1, identities_remove(ids, 3, "1234:5678:ABC", "alice", 0));
     EXPECT_INT_EQ(1, identities_remove(ids, 2, "aa:bb:cc:dd:ee:ff", "alice", 0));
     EXPECT_STR_EQ("aaaa:bbbb", ids[0].ident);
+}
+
+/* === Attribute value validation (I2) === */
+
+/* Test: unknown verify=/mode= values make the line malformed (warned, skipped) */
+T(load_rejects_unknown_verify_and_mode) {
+    char path[] = "/tmp/identities_test_XXXXXX";
+    int fd = mkstemp(path);
+    EXPECT_TRUE(fd >= 0);
+    close(fd);
+    write_temp_file(path,
+        "usb\t1111:1111\talice\tverify=pin\n"
+        "usb\t2222:2222\talice\tmode=always\n"
+        "usb\t3333:3333\talice\tverify=\n"
+        "usb\t4444:4444\talice\tverify=presence\tmode=sufficient\n"
+        "usb\t5555:5555\talice\tverify=secret\tmode=mandatory\n"
+        "bt\tAA:BB:CC:DD:EE:FF\tbob\tverify=sign\tpubkey=/etc/pamhw/keys/bob.pub\n");
+    hw_identity ids[10];
+    int count = 0;
+    warn_record rec = {0};
+    EXPECT_INT_EQ(0, identities_load(path, ids, 10, &count, record_warn, &rec));
+    EXPECT_INT_EQ(3, count);
+    EXPECT_STR_EQ("4444:4444", ids[0].ident);
+    EXPECT_STR_EQ("5555:5555", ids[1].ident);
+    EXPECT_STR_EQ("secret", ids[1].verify);
+    EXPECT_STR_EQ("sign", ids[2].verify);
+    EXPECT_INT_EQ(3, rec.calls);
+    EXPECT_INT_EQ(1, rec.line_nos[0]);
+    EXPECT_INT_EQ(2, rec.line_nos[1]);
+    EXPECT_INT_EQ(3, rec.line_nos[2]);
+    unlink(path);
 }

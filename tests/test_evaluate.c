@@ -376,3 +376,53 @@ T(local_only_whitelist_empty_segments) {
     int result4 = pamhw_local_only("", "tty1", NULL, "");
     EXPECT_INT_EQ(1, result4);
 }
+
+/* === R1 is presence-only: stronger tiers fail closed (I2) === */
+
+/* Test: hand-written verify=secret line with device present must NOT pass on presence */
+T(verify_secret_present_denies) {
+    hw_config cfg = { .mode = "sufficient", .verify = "presence" };
+    hw_identity ids[1] = {
+        { .type = HW_USB, .ident = "0a12:0001:0123456789", .user = "alice", .verify = "secret" }
+    };
+    hw_usb_device devs[1] = { { .ident = "0a12:0001:0123456789" } };
+    EXPECT_INT_EQ(PAM_AUTH_ERR, pamhw_evaluate(&cfg, ids, 1, "alice", devs, 1));
+    snprintf(cfg.mode, sizeof(cfg.mode), "mandatory");
+    EXPECT_INT_EQ(PAM_AUTH_ERR, pamhw_evaluate(&cfg, ids, 1, "alice", devs, 1));
+}
+
+/* Test: verify=sign line absent keeps normal absent semantics for its mode */
+T(verify_sign_absent_mode_semantics) {
+    hw_config cfg = { .mode = "sufficient", .verify = "presence" };
+    hw_identity ids[1] = {
+        { .type = HW_USB, .ident = "0a12:0001", .user = "alice", .verify = "sign" }
+    };
+    hw_usb_device devs[1] = { { .ident = "1234:5678" } };
+    EXPECT_INT_EQ(PAM_IGNORE, pamhw_evaluate(&cfg, ids, 1, "alice", devs, 1));
+    snprintf(ids[0].mode, sizeof(ids[0].mode), "mandatory");
+    EXPECT_INT_EQ(PAM_AUTH_ERR, pamhw_evaluate(&cfg, ids, 1, "alice", devs, 1));
+}
+
+/* Test: global verify=secret applies to lines without verify= and fails closed when present */
+T(global_verify_secret_present_denies) {
+    hw_config cfg = { .mode = "sufficient", .verify = "secret" };
+    hw_identity ids[1] = {
+        { .type = HW_USB, .ident = "0a12:0001", .user = "alice" }
+    };
+    hw_usb_device devs[1] = { { .ident = "0a12:0001" } };
+    EXPECT_INT_EQ(PAM_AUTH_ERR, pamhw_evaluate(&cfg, ids, 1, "alice", devs, 1));
+    /* Explicit per-line presence overrides the global tier */
+    snprintf(ids[0].verify, sizeof(ids[0].verify), "presence");
+    EXPECT_INT_EQ(PAM_SUCCESS, pamhw_evaluate(&cfg, ids, 1, "alice", devs, 1));
+}
+
+/* Test: a failing secret line never poisons an honest presence line (best result wins) */
+T(verify_secret_deny_does_not_poison_pass) {
+    hw_config cfg = { .mode = "sufficient", .verify = "presence" };
+    hw_identity ids[2] = {
+        { .type = HW_USB, .ident = "0a12:0001", .user = "alice", .verify = "secret" },
+        { .type = HW_USB, .ident = "1234:5678", .user = "alice" }
+    };
+    hw_usb_device devs[2] = { { .ident = "0a12:0001" }, { .ident = "1234:5678" } };
+    EXPECT_INT_EQ(PAM_SUCCESS, pamhw_evaluate(&cfg, ids, 2, "alice", devs, 2));
+}

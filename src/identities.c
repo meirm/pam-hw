@@ -39,6 +39,16 @@ static void safe_strcpy(char *dest, const char *src, size_t size) {
     }
 }
 
+/* Helper: verify= values the spec defines (only presence is verifiable in R1) */
+static int is_known_verify(const char *v) {
+    return strcmp(v, "presence") == 0 || strcmp(v, "secret") == 0 || strcmp(v, "sign") == 0;
+}
+
+/* Helper: mode= values the spec defines */
+static int is_known_mode(const char *m) {
+    return strcmp(m, "sufficient") == 0 || strcmp(m, "mandatory") == 0;
+}
+
 /* Helper: exactly len hex digits */
 static int is_hex_run(const char *s, size_t len) {
     for (size_t i = 0; i < len; i++) {
@@ -205,24 +215,31 @@ int identities_load(const char *path, hw_identity *out, int max, int *count,
         safe_strcpy(id.user, user, sizeof(id.user));
         id.line_no = line_no;
         
-        int malformed_attr = 0;
+        const char *malformed_reason = NULL;
         for (int i = 3; i < ntokens; i++) {
             char *field = tokens[i];
             if (is_attr(field, "verify")) {
+                if (!is_known_verify(field + 7)) {
+                    malformed_reason = "unknown verify value";
+                    break;
+                }
                 safe_strcpy(id.verify, field + 7, sizeof(id.verify));
             } else if (is_attr(field, "mode")) {
+                if (!is_known_mode(field + 5)) {
+                    malformed_reason = "unknown mode value";
+                    break;
+                }
                 safe_strcpy(id.mode, field + 5, sizeof(id.mode));
             } else if (is_attr(field, "pubkey")) {
                 safe_strcpy(id.pubkey, field + 7, sizeof(id.pubkey));
             } else {
-                /* Unknown attribute - line is malformed */
-                malformed_attr = 1;
+                malformed_reason = "unknown attribute";
                 break;
             }
         }
         
-        if (malformed_attr) {
-            warn_line(warn, warn_ctx, line_no, "unknown attribute");
+        if (malformed_reason) {
+            warn_line(warn, warn_ctx, line_no, malformed_reason);
             continue;
         }
         

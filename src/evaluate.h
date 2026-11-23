@@ -45,7 +45,10 @@ int pamhw_local_only(const char *rhost, const char *tty,
  * Returns: PAM_SUCCESS, PAM_IGNORE, or PAM_AUTH_ERR
  * 
  * Per-device line result:
- *   - Enrolled USB device present ⇒ PASS
+ *   - Enrolled USB device present, effective verify (line, else global,
+ *     else presence) is presence ⇒ PASS
+ *   - Enrolled USB device present, any other tier ⇒ DENY (R1 cannot verify
+ *     secret/sign, so it fails closed as a verification failure)
  *   - Enrolled USB device absent ⇒ ABSENT
  *   - HW_BT lines ⇒ IGNORE (R1 does not implement BT)
  * 
