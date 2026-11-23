@@ -39,81 +39,74 @@ static void safe_strcpy(char *dest, const char *src, size_t size) {
     }
 }
 
+/* Helper: exactly len hex digits */
+static int is_hex_run(const char *s, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        if (!isxdigit((unsigned char)s[i])) return 0;
+    }
+    return 1;
+}
+
+/*
+ * Helper: username as stored in an identities line: non-empty, fits
+ * hw_identity.user, printable non-space ASCII only, and not starting
+ * with '#' (which the loader would read as a comment).
+ */
+static int is_valid_username(const char *user) {
+    size_t len = strlen(user);
+    if (len == 0 || len >= sizeof(((hw_identity *)0)->user)) return 0;
+    if (user[0] == '#') return 0;
+    for (size_t i = 0; i < len; i++) {
+        if (!isgraph((unsigned char)user[i])) return 0;
+    }
+    return 1;
+}
+
 int identities_normalize(hw_type t, const char *raw, char *out, int max) {
     if (!raw || !out || max < 1) return -1;
-    if (strlen(raw) == 0) return -1;
-    
+
+    size_t len = strlen(raw);
+    if (len == 0 || len > HW_IDENT_MAX || len + 1 > (size_t)max) return -1;
+
+    /* No whitespace, control or non-ASCII bytes anywhere */
+    for (size_t i = 0; i < len; i++) {
+        if (!isgraph((unsigned char)raw[i])) return -1;
+    }
+
     if (t == HW_USB) {
-        /* USB format: vid:pid[:serial] - normalize to lowercase */
-        char buf[256];
-        safe_strcpy(buf, raw, sizeof(buf));
-        
-        /* Count colons */
+        /* USB format: vid:pid[:serial], vid/pid exactly 4 hex digits */
         int colons = 0;
-        for (const char *p = buf; *p; p++) {
+        for (const char *p = raw; *p; p++) {
             if (*p == ':') colons++;
         }
-        
-        /* Must be vid:pid or vid:pid:serial (1 or 2 colons) */
         if (colons < 1 || colons > 2) return -1;
-        
-        /* Split and validate */
-        char vid[16], pid[16], serial[128];
-        vid[0] = pid[0] = serial[0] = '\0';
-        
-        char *p = buf;
-        char *colon1 = strchr(p, ':');
-        if (!colon1) return -1;
-        *colon1 = '\0';
-        safe_strcpy(vid, p, sizeof(vid));
-        
-        p = colon1 + 1;
-        char *colon2 = strchr(p, ':');
-        if (colon2) {
-            *colon2 = '\0';
-            safe_strcpy(pid, p, sizeof(pid));
-            safe_strcpy(serial, colon2 + 1, sizeof(serial));
-        } else {
-            safe_strcpy(pid, p, sizeof(pid));
+
+        if (len < 9 || raw[4] != ':' || !is_hex_run(raw, 4) || !is_hex_run(raw + 5, 4)) {
+            return -1;
         }
-        
-        /* Basic validation: vid and pid must be hex-like (non-empty) */
-        if (strlen(vid) == 0 || strlen(pid) == 0) return -1;
-        
-        /* Convert to lowercase and build output */
-        for (char *c = vid; *c; c++) *c = tolower((unsigned char)*c);
-        for (char *c = pid; *c; c++) *c = tolower((unsigned char)*c);
-        for (char *c = serial; *c; c++) *c = tolower((unsigned char)*c);
-        
-        if (serial[0]) {
-            snprintf(out, max, "%s:%s:%s", vid, pid, serial);
-        } else {
-            snprintf(out, max, "%s:%s", vid, pid);
+        if (len > 9) {
+            /* Serial present: ":" then at least one character */
+            if (raw[9] != ':' || len == 10) return -1;
         }
-        
     } else if (t == HW_BT) {
-        /* BT format: AA:BB:CC:DD:EE:FF - normalize to uppercase */
-        char buf[256];
-        safe_strcpy(buf, raw, sizeof(buf));
-        
-        /* Count colons - should be exactly 5 for MAC address */
-        int colons = 0;
-        for (const char *p = buf; *p; p++) {
-            if (*p == ':') colons++;
+        /* BT format: AA:BB:CC:DD:EE:FF */
+        if (len != 17) return -1;
+        for (size_t i = 0; i < len; i++) {
+            if (i % 3 == 2) {
+                if (raw[i] != ':') return -1;
+            } else if (!isxdigit((unsigned char)raw[i])) {
+                return -1;
+            }
         }
-        if (colons != 5) return -1;
-        
-        /* Convert to uppercase */
-        for (char *c = buf; *c; c++) {
-            *c = toupper((unsigned char)*c);
-        }
-        
-        snprintf(out, max, "%s", buf);
-        
     } else {
         return -1;
     }
-    
+
+    /* USB lowercase, BT uppercase */
+    for (size_t i = 0; i <= len; i++) {
+        out[i] = (t == HW_USB) ? (char)tolower((unsigned char)raw[i])
+                               : (char)toupper((unsigned char)raw[i]);
+    }
     return 0;
 }
 
@@ -194,6 +187,17 @@ int identities_load(const char *path, hw_identity *out, int max, int *count,
             continue;
         }
         
+        /* Identifier and username: same validation as identities_add */
+        char canon[HW_IDENT_MAX + 1];
+        if (identities_normalize(type, tokens[1], canon, sizeof(canon)) != 0) {
+            warn_line(warn, warn_ctx, line_no, "invalid identifier");
+            continue;
+        }
+        if (!is_valid_username(tokens[2])) {
+            warn_line(warn, warn_ctx, line_no, "invalid username");
+            continue;
+        }
+        
         /* Parse attributes */
         hw_identity id;
         memset(&id, 0, sizeof(id));
@@ -254,6 +258,14 @@ const hw_identity *identities_find_device(const hw_identity *l, int n, hw_type t
 
 int identities_add(hw_identity *l, int *n, int max, const hw_identity *add,
                    const char *invoker, int is_root) {
+    /* Reject anything that would not survive a save/load round trip */
+    char canon[HW_IDENT_MAX + 1];
+    if (!is_valid_username(add->user) ||
+        identities_normalize(add->type, add->ident, canon, sizeof(canon)) != 0 ||
+        strcmp(canon, add->ident) != 0) {
+        return -3;
+    }
+    
     /* Check if caller can add this user's identity */
     if (!is_root && strcmp(add->user, invoker) != 0) {
         return -2;  /* Not own username */

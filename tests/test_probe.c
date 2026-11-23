@@ -1257,3 +1257,52 @@ T(probe_list_warns_malformed_line) {
     EXPECT_TRUE(contains(errout, ":2: malformed line, skipped"));
     remove_tree(root);
 }
+
+/* === Identifier / username injection through the probe (C3) === */
+
+/* Test: newline/tab injection in add <ident> is refused and nothing is written */
+T(probe_add_injection_refused) {
+    const char *bad[] = {
+        "x\nusb\t1234:5678:abc\troot\nusb\tc",
+        "1234:5678:abc\troot",
+        "1234:5678:abc root",
+        "123:5678",
+        NULL
+    };
+    if (!get_test_username(1000)) {
+        fprintf(stderr, "Warning: UID 1000 has no username, skipping test\n");
+        return;
+    }
+    for (int i = 0; bad[i]; i++) {
+        char root[] = "/tmp/probe_test_XXXXXX";
+        EXPECT_TRUE(mkdtemp(root) != NULL);
+        char identities_path[512];
+        snprintf(identities_path, sizeof(identities_path), "%s/identities", root);
+        const char *argv[] = {"./pam-hw-probe-test", "add", bad[i],
+                              "--identities", identities_path, NULL};
+        char output[4096], errout[4096];
+        int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
+                                           "0", "0", "1000");
+        EXPECT_INT_EQ(2, exit_code);
+        EXPECT_TRUE(contains(errout, "invalid identifier format"));
+        EXPECT_TRUE(fopen(identities_path, "r") == NULL);
+        remove_tree(root);
+    }
+}
+
+/* Test: root --user with whitespace/control characters is refused */
+T(probe_add_bad_username_refused) {
+    char root[] = "/tmp/probe_test_XXXXXX";
+    EXPECT_TRUE(mkdtemp(root) != NULL);
+    char identities_path[512];
+    snprintf(identities_path, sizeof(identities_path), "%s/identities", root);
+    const char *argv[] = {"./pam-hw-probe-test", "add", "1234:5678",
+                          "--user", "eve\nusb\t1111:2222\troot", "--identities", identities_path, NULL};
+    char output[4096], errout[4096];
+    int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
+                                       "0", "0", NULL);
+    EXPECT_INT_EQ(2, exit_code);
+    EXPECT_TRUE(contains(errout, "invalid username or identifier"));
+    EXPECT_TRUE(fopen(identities_path, "r") == NULL);
+    remove_tree(root);
+}

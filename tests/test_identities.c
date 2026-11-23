@@ -545,3 +545,125 @@ T(remove_all_root_scoped) {
     EXPECT_STR_EQ("bob", ids[1].user);
     EXPECT_STR_EQ("AA:BB:CC:DD:EE:FF", ids[1].ident);
 }
+
+/* === Strict identifier / username validation (C3) === */
+
+/* Test: vid and pid must be exactly 4 hex digits, any case, normalized lowercase */
+T(normalize_usb_hex_fields) {
+    char out[128];
+    EXPECT_INT_EQ(0, identities_normalize(HW_USB, "AbCd:EF01:SeRiAl", out, sizeof(out)));
+    EXPECT_STR_EQ("abcd:ef01:serial", out);
+    EXPECT_INT_EQ(-1, identities_normalize(HW_USB, "12g4:5678", out, sizeof(out)));
+    EXPECT_INT_EQ(-1, identities_normalize(HW_USB, "123:5678", out, sizeof(out)));
+    EXPECT_INT_EQ(-1, identities_normalize(HW_USB, "12345:5678", out, sizeof(out)));
+    EXPECT_INT_EQ(-1, identities_normalize(HW_USB, "1234:567", out, sizeof(out)));
+    EXPECT_INT_EQ(-1, identities_normalize(HW_USB, "1234:", out, sizeof(out)));
+    EXPECT_INT_EQ(-1, identities_normalize(HW_USB, "1234:5678:", out, sizeof(out)));
+    EXPECT_INT_EQ(-1, identities_normalize(HW_USB, "0x12:5678", out, sizeof(out)));
+}
+
+/* Test: newline injection attempt is rejected (would forge a root line) */
+T(normalize_usb_rejects_newline_injection) {
+    char out[128];
+    EXPECT_INT_EQ(-1, identities_normalize(HW_USB,
+        "x\nusb\t1234:5678:abc\troot\nusb\tc", out, sizeof(out)));
+    EXPECT_INT_EQ(-1, identities_normalize(HW_USB, "1234:5678:abc\n", out, sizeof(out)));
+    EXPECT_INT_EQ(-1, identities_normalize(HW_USB, "1234:5678:abc\r", out, sizeof(out)));
+}
+
+/* Test: tab, space and control characters anywhere in the identifier are rejected */
+T(normalize_usb_rejects_whitespace_control) {
+    char out[128];
+    EXPECT_INT_EQ(-1, identities_normalize(HW_USB, "1234:5678:abc\troot", out, sizeof(out)));
+    EXPECT_INT_EQ(-1, identities_normalize(HW_USB, "1234:5678:ab cd", out, sizeof(out)));
+    EXPECT_INT_EQ(-1, identities_normalize(HW_USB, "1234:5678:ab\x01", out, sizeof(out)));
+    EXPECT_INT_EQ(-1, identities_normalize(HW_USB, "1234:5678:ab\x7f", out, sizeof(out)));
+    EXPECT_INT_EQ(-1, identities_normalize(HW_USB, " 1234:5678", out, sizeof(out)));
+    EXPECT_INT_EQ(-1, identities_normalize(HW_USB, "1234:5678:\xc3\xa9", out, sizeof(out)));
+}
+
+/* Test: oversized identifiers are rejected, never truncated into a valid one */
+T(normalize_usb_rejects_oversized) {
+    char raw[512], out[128];
+    /* 10 chars "1234:5678:" + 117 serial = 127 total: the maximum */
+    memcpy(raw, "1234:5678:", 10);
+    memset(raw + 10, 'a', 117);
+    raw[127] = '\0';
+    EXPECT_INT_EQ(0, identities_normalize(HW_USB, raw, out, sizeof(out)));
+    EXPECT_INT_EQ(127, (int)strlen(out));
+    /* One more serial char is over the cap */
+    memset(raw + 10, 'a', 118);
+    raw[128] = '\0';
+    EXPECT_INT_EQ(-1, identities_normalize(HW_USB, raw, out, sizeof(out)));
+    /* Far oversized input that would truncate to a valid prefix */
+    memset(raw + 10, 'a', 400);
+    raw[410] = '\0';
+    EXPECT_INT_EQ(-1, identities_normalize(HW_USB, raw, out, sizeof(out)));
+    /* Output buffer too small to hold the result */
+    char small[8];
+    EXPECT_INT_EQ(-1, identities_normalize(HW_USB, "1234:5678", small, sizeof(small)));
+}
+
+/* Test: BT MAC must be six 2-hex-digit groups */
+T(normalize_bt_strict) {
+    char out[128];
+    EXPECT_INT_EQ(0, identities_normalize(HW_BT, "dc:54:75:c2:ab:12", out, sizeof(out)));
+    EXPECT_STR_EQ("DC:54:75:C2:AB:12", out);
+    EXPECT_INT_EQ(-1, identities_normalize(HW_BT, "GG:BB:CC:DD:EE:FF", out, sizeof(out)));
+    EXPECT_INT_EQ(-1, identities_normalize(HW_BT, "A:BB:CC:DD:EE:FFF", out, sizeof(out)));
+    EXPECT_INT_EQ(-1, identities_normalize(HW_BT, "AA:BB:CC:DD:EE:F\n", out, sizeof(out)));
+}
+
+/* Test: identities_add rejects invalid usernames before anything is saved */
+T(add_rejects_bad_username) {
+    const char *bad[] = {"", "bad user", "bad\tuser", "bad\nuser", "bad\x01", "#root", NULL};
+    for (int i = 0; bad[i]; i++) {
+        hw_identity ids[4];
+        int count = 0;
+        hw_identity add;
+        memset(&add, 0, sizeof(add));
+        add.type = HW_USB;
+        snprintf(add.ident, sizeof(add.ident), "1234:5678");
+        snprintf(add.user, sizeof(add.user), "%s", bad[i]);
+        EXPECT_INT_EQ(-3, identities_add(ids, &count, 4, &add, "root", 1));
+        EXPECT_INT_EQ(0, count);
+    }
+}
+
+/* Test: identities_add rejects a non-canonical or invalid identifier */
+T(add_rejects_bad_ident) {
+    const char *bad[] = {"1234:5678:a\nusb", "1234:5678:a\tb", "123:5678", "1234:5678:ABC", NULL};
+    for (int i = 0; bad[i]; i++) {
+        hw_identity ids[4];
+        int count = 0;
+        hw_identity add;
+        memset(&add, 0, sizeof(add));
+        add.type = HW_USB;
+        snprintf(add.ident, sizeof(add.ident), "%s", bad[i]);
+        snprintf(add.user, sizeof(add.user), "alice");
+        EXPECT_INT_EQ(-3, identities_add(ids, &count, 4, &add, "alice", 0));
+        EXPECT_INT_EQ(0, count);
+    }
+}
+
+/* Test: loader applies the same validation (bad hex, control char in user) */
+T(load_rejects_invalid_ident_and_user) {
+    char path[] = "/tmp/identities_test_XXXXXX";
+    int fd = mkstemp(path);
+    EXPECT_TRUE(fd >= 0);
+    close(fd);
+    write_temp_file(path,
+        "usb\tzz12:5678\talice\n"
+        "usb\t123:5678\talice\n"
+        "usb\t1234:5678\tal\x01ice\n"
+        "bt\tAA:BB:CC:DD:EE\talice\n"
+        "usb\t1234:5678\tbob\n");
+    hw_identity ids[10];
+    int count = 0;
+    warn_record rec = {0};
+    EXPECT_INT_EQ(0, identities_load(path, ids, 10, &count, record_warn, &rec));
+    EXPECT_INT_EQ(1, count);
+    EXPECT_STR_EQ("bob", ids[0].user);
+    EXPECT_INT_EQ(4, rec.calls);
+    unlink(path);
+}

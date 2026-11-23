@@ -365,6 +365,10 @@ static int cmd_add(int argc, char **argv) {
             fprintf(stderr, "Error: non-root users can only enroll their own devices\n");
             return 1;
         }
+        if (strlen(target_user) >= sizeof(user)) {
+            fprintf(stderr, "Error: username too long\n");
+            return 2;
+        }
         snprintf(user, sizeof(user), "%s", target_user);
     } else {
         /* Default to invoker */
@@ -438,8 +442,12 @@ static int cmd_add(int argc, char **argv) {
             return 1;
         }
         
-        /* Exactly one unenrolled device */
-        snprintf(ident, sizeof(ident), "%s", devices[unenrolled_idx].ident);
+        /* Exactly one unenrolled device: must pass the same validation */
+        if (identities_normalize(HW_USB, devices[unenrolled_idx].ident, ident, sizeof(ident)) != 0) {
+            fprintf(stderr, "Error: device identifier cannot be enrolled: %s\n",
+                    devices[unenrolled_idx].ident);
+            return 1;
+        }
     } else {
         /* Normalize explicit identifier */
         if (identities_normalize(HW_USB, ident_arg, ident, sizeof(ident)) != 0) {
@@ -469,6 +477,9 @@ static int cmd_add(int argc, char **argv) {
     } else if (result == -2) {
         fprintf(stderr, "Error: non-root users can only manage their own devices\n");
         return 1;
+    } else if (result == -3) {
+        fprintf(stderr, "Error: invalid username or identifier\n");
+        return 2;
     }
     
     /* Save identities */

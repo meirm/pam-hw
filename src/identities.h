@@ -6,6 +6,9 @@
 
 #include "warn.h"
 
+/* Longest identifier accepted (fits hw_identity.ident) */
+#define HW_IDENT_MAX 127
+
 /* Hardware types */
 typedef enum {
     HW_BT,
@@ -36,8 +39,11 @@ int identities_load(const char *path, hw_identity *out, int max, int *count,
 
 /*
  * Normalize hardware identifier.
- * USB: lowercase vid:pid[:serial]
+ * USB: lowercase vid:pid[:serial]; vid and pid exactly 4 hex digits,
+ *      serial non-empty when present
  * BT: uppercase AA:BB:CC:DD:EE:FF
+ * Any whitespace, control or non-ASCII byte, or a length above
+ * HW_IDENT_MAX (or above max-1), is malformed.
  * Returns 0 on valid, -1 on malformed.
  */
 int identities_normalize(hw_type t, const char *raw, char *out, int max);
@@ -60,6 +66,7 @@ const hw_identity *identities_find_device(const hw_identity *l, int n, hw_type t
  *   0: success (added or replaced own existing entry)
  *  -1: hijack attempt (ident owned by other user, caller not root)
  *  -2: not own username (add->user != invoker, caller not root)
+ *  -3: invalid username or non-canonical/invalid identifier
  */
 int identities_add(hw_identity *l, int *n, int max, const hw_identity *add,
                    const char *invoker, int is_root);
