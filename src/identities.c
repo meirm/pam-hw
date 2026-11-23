@@ -141,8 +141,8 @@ int identities_load(const char *path, hw_identity *out, int max, int *count,
         if (line[0] == '\0' || line[0] == '#') continue;
         
         /* Parse line: type<TAB>ident<TAB>user[<TAB>attr=value]... */
-        char type_str[32], ident[128], user[64];
-        type_str[0] = ident[0] = user[0] = '\0';
+        char type_str[32], user[64];
+        type_str[0] = user[0] = '\0';
         
         /* Tokenize by whitespace (spaces or tabs) */
         char *tokens[32];
@@ -173,7 +173,6 @@ int identities_load(const char *path, hw_identity *out, int max, int *count,
         }
         
         safe_strcpy(type_str, tokens[0], sizeof(type_str));
-        safe_strcpy(ident, tokens[1], sizeof(ident));
         safe_strcpy(user, tokens[2], sizeof(user));
         
         /* Parse type */
@@ -202,7 +201,7 @@ int identities_load(const char *path, hw_identity *out, int max, int *count,
         hw_identity id;
         memset(&id, 0, sizeof(id));
         id.type = type;
-        safe_strcpy(id.ident, ident, sizeof(id.ident));
+        safe_strcpy(id.ident, canon, sizeof(id.ident));
         safe_strcpy(id.user, user, sizeof(id.user));
         id.line_no = line_no;
         
@@ -298,18 +297,27 @@ int identities_remove(hw_identity *l, int n, const char *ident_or_all,
                       const char *invoker, int is_root) {
     int removed = 0;
     int write_pos = 0;
+    int remove_all = (strcmp(ident_or_all, "all") == 0);
+    
+    /* Canonical forms of the argument (USB and BT shapes cannot overlap) */
+    char usb_canon[HW_IDENT_MAX + 1], bt_canon[HW_IDENT_MAX + 1];
+    int usb_ok = (identities_normalize(HW_USB, ident_or_all, usb_canon, sizeof(usb_canon)) == 0);
+    int bt_ok = (identities_normalize(HW_BT, ident_or_all, bt_canon, sizeof(bt_canon)) == 0);
     
     for (int i = 0; i < n; i++) {
         int should_remove = 0;
         
-        if (strcmp(ident_or_all, "all") == 0) {
+        if (remove_all) {
             /* Remove all own identities (always invoker-scoped, even for root) */
             if (strcmp(l[i].user, invoker) == 0) {
                 should_remove = 1;
             }
         } else {
             /* Remove specific identity */
-            if (strcmp(l[i].ident, ident_or_all) == 0) {
+            int ident_match = (l[i].type == HW_USB)
+                ? (usb_ok && strcmp(l[i].ident, usb_canon) == 0)
+                : (bt_ok && strcmp(l[i].ident, bt_canon) == 0);
+            if (ident_match) {
                 if (is_root || strcmp(l[i].user, invoker) == 0) {
                     should_remove = 1;
                 }

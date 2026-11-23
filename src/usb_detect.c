@@ -152,6 +152,7 @@ int usb_scan(const char *sys_root, hw_usb_device *out, int max, int *count) {
         }
         if (read_sysfs_file(dev_path, buf, sizeof(buf)) == 0 && !is_garbage_serial(buf)) {
             safe_strcpy(dev.serial, buf, sizeof(dev.serial));
+            to_lowercase(dev.serial);  /* canonical identifier form is lowercase */
             dev.has_serial = 1;
         } else {
             dev.serial[0] = '\0';

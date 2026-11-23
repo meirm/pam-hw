@@ -667,3 +667,34 @@ T(load_rejects_invalid_ident_and_user) {
     EXPECT_INT_EQ(4, rec.calls);
     unlink(path);
 }
+
+/* === Canonical lowercase identifiers (C4) === */
+
+/* Test: loader normalizes hand-written identifiers (USB lowercase, BT uppercase) */
+T(load_normalizes_ident) {
+    char path[] = "/tmp/identities_test_XXXXXX";
+    int fd = mkstemp(path);
+    EXPECT_TRUE(fd >= 0);
+    close(fd);
+    write_temp_file(path,
+        "usb\t0A12:0001:ABCdef\talice\n"
+        "bt\taa:bb:cc:dd:ee:ff\tbob\n");
+    hw_identity ids[10];
+    int count = 0;
+    EXPECT_INT_EQ(0, identities_load(path, ids, 10, &count, NULL, NULL));
+    EXPECT_INT_EQ(2, count);
+    EXPECT_STR_EQ("0a12:0001:abcdef", ids[0].ident);
+    EXPECT_STR_EQ("AA:BB:CC:DD:EE:FF", ids[1].ident);
+    unlink(path);
+}
+
+/* Test: remove normalizes its argument before matching */
+T(remove_normalizes_argument) {
+    hw_identity ids[3];
+    ids[0] = (hw_identity){ HW_USB, "1234:5678:abc", "alice", "", "", "", 1 };
+    ids[1] = (hw_identity){ HW_BT, "AA:BB:CC:DD:EE:FF", "alice", "", "", "", 2 };
+    ids[2] = (hw_identity){ HW_USB, "aaaa:bbbb", "alice", "", "", "", 3 };
+    EXPECT_INT_EQ(1, identities_remove(ids, 3, "1234:5678:ABC", "alice", 0));
+    EXPECT_INT_EQ(1, identities_remove(ids, 2, "aa:bb:cc:dd:ee:ff", "alice", 0));
+    EXPECT_STR_EQ("aaaa:bbbb", ids[0].ident);
+}

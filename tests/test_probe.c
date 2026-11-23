@@ -13,6 +13,10 @@
 #include <pwd.h>
 #include "test.h"
 #include "helpers.h"
+#include <security/pam_modules.h>
+#include "../src/identities.h"
+#include "../src/usb_detect.h"
+#include "../src/evaluate.h"
 
 /* Helper: run probe with args, return exit status and capture stdout */
 static int run_probe(const char *const argv[], char *output, size_t output_size) {
@@ -250,7 +254,7 @@ T(probe_list_basic) {
     
     /* Verify output format: usb<whitespace><ident> */
     EXPECT_TRUE(contains(output, "usb"));
-    EXPECT_TRUE(contains(output, "046d:c52b:ABC123"));
+    EXPECT_TRUE(contains(output, "046d:c52b:abc123"));
     EXPECT_TRUE(contains(output, "0a12:0001"));
     
     /* Verify product name comment appears */
@@ -306,7 +310,7 @@ T(probe_list_enrolled) {
     EXPECT_INT_EQ(0, exit_code);
     
     /* Verify enrolled annotation */
-    EXPECT_TRUE(contains(output, "046d:c52b:ABC123"));
+    EXPECT_TRUE(contains(output, "046d:c52b:abc123"));
     EXPECT_TRUE(contains(output, "# enrolled: alice"));
     
     remove_tree(root);
@@ -371,8 +375,8 @@ T(probe_list_mine) {
     EXPECT_INT_EQ(0, exit_code);
     
     /* Should only show current user's device */
-    EXPECT_TRUE(contains(output, "046d:c52b:MINE"));
-    EXPECT_TRUE(!contains(output, "1234:5678:THEIRS"));
+    EXPECT_TRUE(contains(output, "046d:c52b:mine"));
+    EXPECT_TRUE(!contains(output, "1234:5678:theirs"));
     
     remove_tree(root);
 }
@@ -473,7 +477,7 @@ T(probe_list_output_format) {
     EXPECT_TRUE(line[3] == ' ' || line[3] == '\t');
     
     /* Should contain ident in correct format */
-    EXPECT_TRUE(strstr(line, "046d:c52b:ABC") != NULL);
+    EXPECT_TRUE(strstr(line, "046d:c52b:abc") != NULL);
     
     /* Should have comment with product name */
     EXPECT_TRUE(strstr(line, "# Test Product") != NULL);
@@ -850,7 +854,7 @@ T(probe_add_auto_single) {
     /* Verify device enrolled */
     char file_content[4096];
     EXPECT_INT_EQ(0, read_file(identities_path, file_content, sizeof(file_content)));
-    EXPECT_TRUE(contains(file_content, "1234:5678:SER123") || contains(file_content, "1234:5678:ser123"));
+    EXPECT_TRUE(contains(file_content, "1234:5678:ser123"));
     
     remove_tree(root);
 }
@@ -1304,5 +1308,69 @@ T(probe_add_bad_username_refused) {
     EXPECT_INT_EQ(2, exit_code);
     EXPECT_TRUE(contains(errout, "invalid username or identifier"));
     EXPECT_TRUE(fopen(identities_path, "r") == NULL);
+    remove_tree(root);
+}
+
+/* === Serial case canonicalization (C4): README list -> add -> login flow === */
+
+/* Test: capitalized serial: list, add <ident with caps>, save/load, evaluate => PAM_SUCCESS */
+T(probe_flow_capitalized_serial_matches) {
+    char root[] = "/tmp/probe_test_XXXXXX";
+    EXPECT_TRUE(mkdtemp(root) != NULL);
+    const char *username = get_test_username(1000);
+    if (!username) {
+        fprintf(stderr, "Warning: UID 1000 has no username, skipping test\n");
+        remove_tree(root);
+        return;
+    }
+    
+    char sysfs[512], devices_dir[600];
+    snprintf(sysfs, sizeof(sysfs), "%s/sys", root);
+    mkdir(sysfs, 0755);
+    snprintf(devices_dir, sizeof(devices_dir), "%s/bus", sysfs);
+    mkdir(devices_dir, 0755);
+    snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb", sysfs);
+    mkdir(devices_dir, 0755);
+    snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb/devices", sysfs);
+    mkdir(devices_dir, 0755);
+    fake_usb(devices_dir, "1-1", "0781", "5581", "4C530001230925116443", "SanDisk Ultra");
+    
+    char conf_path[512], identities_path[512];
+    snprintf(conf_path, sizeof(conf_path), "%s/pamhw.conf", root);
+    snprintf(identities_path, sizeof(identities_path), "%s/identities", root);
+    FILE *f = fopen(conf_path, "w");
+    fprintf(f, "sys_root=%s\n", sysfs);
+    fclose(f);
+    
+    /* Step 1: list shows the canonical identifier */
+    const char *list_argv[] = {"./pam-hw-probe-test", "list", "--conf", conf_path,
+                               "--identities", identities_path, NULL};
+    char output[4096], errout[4096];
+    EXPECT_INT_EQ(0, run_probe_both(list_argv, output, sizeof(output), errout, sizeof(errout)));
+    EXPECT_TRUE(contains(output, "0781:5581:4c530001230925116443"));
+    
+    /* Step 2: user types the identifier as printed on the label (caps) */
+    const char *add_argv[] = {"./pam-hw-probe-test", "add", "0781:5581:4C530001230925116443",
+                              "--conf", conf_path, "--identities", identities_path, NULL};
+    EXPECT_INT_EQ(0, run_probe_test_env(add_argv, output, sizeof(output), errout, sizeof(errout),
+                                        "0", "0", "1000"));
+    
+    /* Step 3: module path: load identities, scan, evaluate */
+    hw_identity ids[16];
+    int n = 0;
+    EXPECT_INT_EQ(0, identities_load(identities_path, ids, 16, &n, NULL, NULL));
+    EXPECT_INT_EQ(1, n);
+    hw_usb_device devs[16];
+    int ndevs = 0;
+    EXPECT_INT_EQ(0, usb_scan(sysfs, devs, 16, &ndevs));
+    EXPECT_INT_EQ(1, ndevs);
+    hw_config cfg;
+    EXPECT_INT_EQ(0, config_load(conf_path, &cfg));
+    EXPECT_INT_EQ(PAM_SUCCESS, pamhw_evaluate(&cfg, ids, n, username, devs, ndevs));
+    
+    /* Mandatory mode: same flow must not lock the user out */
+    snprintf(cfg.mode, sizeof(cfg.mode), "mandatory");
+    EXPECT_INT_EQ(PAM_SUCCESS, pamhw_evaluate(&cfg, ids, n, username, devs, ndevs));
+    
     remove_tree(root);
 }

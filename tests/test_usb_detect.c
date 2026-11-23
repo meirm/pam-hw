@@ -46,11 +46,12 @@ T(basic_two_devices) {
             EXPECT_STR_EQ("0123456789", devs[i].serial);
             EXPECT_INT_EQ(1, devs[i].has_serial);
             EXPECT_STR_EQ("Test Device 1", devs[i].name);
-        } else if (strcmp(devs[i].ident, "046d:c52b:ABCDEF01") == 0) {
+        } else if (strcmp(devs[i].ident, "046d:c52b:abcdef01") == 0) {
+            /* Serial canonicalized to lowercase like vid/pid */
             found_2 = 1;
             EXPECT_STR_EQ("046d", devs[i].vendor);
             EXPECT_STR_EQ("c52b", devs[i].product);
-            EXPECT_STR_EQ("ABCDEF01", devs[i].serial);
+            EXPECT_STR_EQ("abcdef01", devs[i].serial);
             EXPECT_INT_EQ(1, devs[i].has_serial);
             EXPECT_STR_EQ("Test Device 2", devs[i].name);
         }
@@ -89,7 +90,7 @@ T(root_hub_skipped) {
     EXPECT_INT_EQ(1, count);
     
     /* Only the real device should be found */
-    EXPECT_STR_EQ("0a12:0001:REALSERIAL", devs[0].ident);
+    EXPECT_STR_EQ("0a12:0001:realserial", devs[0].ident);
     
     /* Verify root hub serial is not in any device */
     for (int i = 0; i < count; i++) {
@@ -246,7 +247,7 @@ T(missing_idVendor_skipped) {
     
     EXPECT_INT_EQ(0, ret);
     EXPECT_INT_EQ(1, count);
-    EXPECT_STR_EQ("0a12:0002:VALID", devs[0].ident);
+    EXPECT_STR_EQ("0a12:0002:valid", devs[0].ident);
     
     remove_tree(root);
 }
@@ -284,7 +285,7 @@ T(missing_idProduct_skipped) {
     
     EXPECT_INT_EQ(0, ret);
     EXPECT_INT_EQ(1, count);
-    EXPECT_STR_EQ("0a12:0002:VALID", devs[0].ident);
+    EXPECT_STR_EQ("0a12:0002:valid", devs[0].ident);
     
     remove_tree(root);
 }
@@ -353,7 +354,7 @@ T(no_product_name) {
     
     EXPECT_INT_EQ(0, ret);
     EXPECT_INT_EQ(1, count);
-    EXPECT_STR_EQ("0a12:0001:SERIAL1", devs[0].ident);
+    EXPECT_STR_EQ("0a12:0001:serial1", devs[0].ident);
     EXPECT_STR_EQ("", devs[0].name);
     
     remove_tree(root);
