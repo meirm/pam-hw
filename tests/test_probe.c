@@ -316,67 +316,64 @@ T(probe_list_enrolled) {
     remove_tree(root);
 }
 
-/* Test: --mine flag filters to current user's devices */
+/* Test: --mine under sudo lists the invoker's identity lines, connected or not, bt included */
 T(probe_list_mine) {
     char root[] = "/tmp/probe_test_XXXXXX";
     EXPECT_TRUE(mkdtemp(root) != NULL);
     
-    char sysfs[512];
-    snprintf(sysfs, sizeof(sysfs), "%s/sys", root);
-    mkdir(sysfs, 0755);
-    
-    char devices_dir[512];
-    int ret;
-    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus", sysfs);
-    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
-    mkdir(devices_dir, 0755);
-    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb", sysfs);
-    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
-    mkdir(devices_dir, 0755);
-    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb/devices", sysfs);
-    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
-    mkdir(devices_dir, 0755);
-    
-    fake_usb(devices_dir, "1-1", "046d", "c52b", "MINE", "My Device");
-    fake_usb(devices_dir, "2-2", "1234", "5678", "THEIRS", "Other Device");
-    
-    /* Get current username */
-    char username[64];
-    uid_t uid = getuid();
-    struct passwd *pw = getpwuid(uid);
-    if (!pw) {
-        fprintf(stderr, "Warning: getpwuid failed for --mine test\n");
+    const char *username = get_test_username(1000);
+    if (!username) {
+        fprintf(stderr, "Warning: UID 1000 has no username, skipping test\n");
         remove_tree(root);
         return;
     }
-    snprintf(username, sizeof(username), "%s", pw->pw_name);
     
-    /* Create identities file */
+    char sysfs[512], devices_dir[600];
+    snprintf(sysfs, sizeof(sysfs), "%s/sys", root);
+    mkdir(sysfs, 0755);
+    snprintf(devices_dir, sizeof(devices_dir), "%s/bus", sysfs);
+    mkdir(devices_dir, 0755);
+    snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb", sysfs);
+    mkdir(devices_dir, 0755);
+    snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb/devices", sysfs);
+    mkdir(devices_dir, 0755);
+    
+    /* Only the first enrolled stick is connected */
+    fake_usb(devices_dir, "1-1", "046d", "c52b", "MINE", "My Device");
+    fake_usb(devices_dir, "2-2", "1234", "5678", "THEIRS", "Other Device");
+    
     char identities_path[512];
     snprintf(identities_path, sizeof(identities_path), "%s/identities", root);
     FILE *f = fopen(identities_path, "w");
-    fprintf(f, "usb\t046d:c52b:MINE\t%s\n", username);
-    fprintf(f, "usb\t1234:5678:THEIRS\tother_user\n");
+    fprintf(f, "usb\t046d:c52b:mine\t%s\tverify=presence\n", username);
+    fprintf(f, "usb\t0781:5581:unplugged\t%s\tmode=mandatory\n", username);
+    fprintf(f, "bt\tAA:BB:CC:DD:EE:FF\t%s\n", username);
+    fprintf(f, "usb\t1234:5678:theirs\tother_user\n");
     fclose(f);
     
-    /* Create config */
     char conf_path[512];
     snprintf(conf_path, sizeof(conf_path), "%s/pamhw.conf", root);
     f = fopen(conf_path, "w");
     fprintf(f, "sys_root=%s\n", sysfs);
     fclose(f);
     
-    /* Run probe with --mine */
+    /* Real sudo: uid 0, SUDO_UID=1000 */
     const char *argv[] = {"./pam-hw-probe-test", "list", "--mine", "--conf", conf_path,
                           "--identities", identities_path, NULL};
-    char output[4096];
-    int exit_code = run_probe(argv, output, sizeof(output));
+    char output[4096], errout[4096];
+    int exit_code = run_probe_test_env(argv, output, sizeof(output), errout, sizeof(errout),
+                                       "0", "0", "1000");
     
     EXPECT_INT_EQ(0, exit_code);
-    
-    /* Should only show current user's device */
-    EXPECT_TRUE(contains(output, "046d:c52b:mine"));
-    EXPECT_TRUE(!contains(output, "1234:5678:theirs"));
+    char expected[256];
+    snprintf(expected, sizeof(expected), "usb\t046d:c52b:mine\t%s\tverify=presence\n", username);
+    EXPECT_TRUE(contains(output, expected));
+    snprintf(expected, sizeof(expected), "usb\t0781:5581:unplugged\t%s\tmode=mandatory\n", username);
+    EXPECT_TRUE(contains(output, expected));
+    snprintf(expected, sizeof(expected), "bt\tAA:BB:CC:DD:EE:FF\t%s\n", username);
+    EXPECT_TRUE(contains(output, expected));
+    EXPECT_TRUE(!contains(output, "theirs"));
+    EXPECT_TRUE(!contains(output, "other_user"));
     
     remove_tree(root);
 }

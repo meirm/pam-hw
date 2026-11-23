@@ -55,7 +55,7 @@ static void usage(FILE *out) {
     fprintf(out, "  add <ident|AUTO> [options]    Enroll device\n");
     fprintf(out, "  remove <ident|all>            Remove enrollment\n");
     fprintf(out, "\nOptions:\n");
-    fprintf(out, "  --mine                        Show only devices enrolled by current user\n");
+    fprintf(out, "  --mine                        Show the invoking user's identity lines\n");
     fprintf(out, "  --user NAME                   Target username (root only)\n");
     fprintf(out, "  --verify presence|secret|sign Verification method (default: presence)\n");
     fprintf(out, "  --conf PATH                   Configuration file (root only)\n");
@@ -216,16 +216,23 @@ static int cmd_list(int argc, char **argv) {
         return 1;
     }
     
-    /* Get current username for --mine */
-    char username[64] = {0};
+    /* --mine: the invoking user's identity lines (connected or not, bt included) */
     if (mine_flag) {
-        uid_t uid = test_getuid();
-        struct passwd *pw = getpwuid(uid);
-        if (!pw) {
-            fprintf(stderr, "Error: could not determine current user\n");
+        char username[64];
+        int is_root;
+        if (resolve_invoker(username, sizeof(username), &is_root) != 0) {
             return 1;
         }
-        snprintf(username, sizeof(username), "%s", pw->pw_name);
+        for (i = 0; i < identity_count; i++) {
+            const hw_identity *id = &identities[i];
+            if (strcmp(id->user, username) != 0) continue;
+            printf("%s\t%s\t%s", id->type == HW_USB ? "usb" : "bt", id->ident, id->user);
+            if (id->verify[0]) printf("\tverify=%s", id->verify);
+            if (id->mode[0]) printf("\tmode=%s", id->mode);
+            if (id->pubkey[0]) printf("\tpubkey=%s", id->pubkey);
+            printf("\n");
+        }
+        return 0;
     }
     
     /* Scan USB devices */
@@ -236,7 +243,7 @@ static int cmd_list(int argc, char **argv) {
         return 0;
     }
     
-    /* Print results */
+    /* Print connected devices: usb <ident> # comments */
     for (i = 0; i < device_count; i++) {
         const hw_usb_device *dev = &devices[i];
         
@@ -244,41 +251,24 @@ static int cmd_list(int argc, char **argv) {
         const hw_identity *enrolled = identities_find_device(
             identities, identity_count, HW_USB, dev->ident);
         
-        /* If --mine is set, only show devices enrolled by current user */
-        if (mine_flag) {
-            if (!enrolled || strcmp(enrolled->user, username) != 0) {
-                continue;
-            }
-            /* Print identity line format for --mine */
-            printf("usb\t%s\t%s", dev->ident, username);
-            if (enrolled->verify[0]) {
-                printf("\tverify=%s", enrolled->verify);
-            }
-            if (enrolled->mode[0]) {
-                printf("\tmode=%s", enrolled->mode);
-            }
-            printf("\n");
-        } else {
-            /* Normal list mode: usb <ident> # comments */
-            printf("usb\t%s", dev->ident);
-            
-            /* Add product name comment if available */
-            if (dev->name[0]) {
-                printf("\t# %s", dev->name);
-            }
-            
-            /* Add enrollment annotation if enrolled */
-            if (enrolled) {
-                /* Use separate comment segment for greppability */
-                if (dev->name[0]) {
-                    printf("  # enrolled: %s", enrolled->user);
-                } else {
-                    printf("\t# enrolled: %s", enrolled->user);
-                }
-            }
-            
-            printf("\n");
+        printf("usb\t%s", dev->ident);
+        
+        /* Add product name comment if available */
+        if (dev->name[0]) {
+            printf("\t# %s", dev->name);
         }
+        
+        /* Add enrollment annotation if enrolled */
+        if (enrolled) {
+            /* Use separate comment segment for greppability */
+            if (dev->name[0]) {
+                printf("  # enrolled: %s", enrolled->user);
+            } else {
+                printf("\t# enrolled: %s", enrolled->user);
+            }
+        }
+        
+        printf("\n");
     }
     
     return 0;
