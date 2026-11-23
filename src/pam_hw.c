@@ -1,16 +1,118 @@
 /*
  * pam_hw.c — USB hardware presence authentication module
- * Placeholder: returns PAM_IGNORE until implemented
+ * 
+ * Entry point that wires PAM items to core functions (config, identities,
+ * USB scan, local-only guard, evaluator). All authentication logic lives in
+ * the core; this file only fetches PAM items, calls the core, and logs.
  */
 #include <security/pam_modules.h>
+#include <security/pam_ext.h>
+#include <syslog.h>
+#include <string.h>
+
+#include "config.h"
+#include "identities.h"
+#include "usb_detect.h"
+#include "evaluate.h"
+
+/* Capacity limits for fixed-size arrays */
+#define MAX_IDENTITIES 64
+#define MAX_DEVICES 64
 
 PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
                                    int argc, const char **argv) {
-    (void)pamh;
     (void)flags;
     (void)argc;
     (void)argv;
-    return PAM_IGNORE;
+
+    const char *user = NULL;
+    const char *rhost = NULL;
+    const char *tty = NULL;
+    const char *service = NULL;
+
+    /* Fetch PAM items (all can be NULL) */
+    if (pam_get_user(pamh, &user, NULL) != PAM_SUCCESS || user == NULL) {
+        pam_syslog(pamh, LOG_WARNING, "pam_hw: failed to get PAM_USER, returning PAM_IGNORE");
+        return PAM_IGNORE;
+    }
+
+    pam_get_item(pamh, PAM_RHOST, (const void **)&rhost);
+    pam_get_item(pamh, PAM_TTY, (const void **)&tty);
+    pam_get_item(pamh, PAM_SERVICE, (const void **)&service);
+
+    /* Load configuration */
+    hw_config cfg;
+    if (config_load("/etc/pamhw/pamhw.conf", &cfg) != 0) {
+        pam_syslog(pamh, LOG_ERR, "pam_hw: config_load failed");
+        return PAM_IGNORE;
+    }
+
+    /* Guard: local-only check runs FIRST, before any I/O */
+    if (!pamhw_local_only(rhost, tty, service, cfg.services)) {
+        if (cfg.debug) {
+            pam_syslog(pamh, LOG_DEBUG,
+                       "pam_hw: step aside (remote or excluded service): "
+                       "rhost=%s tty=%s service=%s",
+                       rhost ? rhost : "(null)",
+                       tty ? tty : "(null)",
+                       service ? service : "(null)");
+        }
+        return PAM_IGNORE;
+    }
+
+    if (cfg.debug) {
+        pam_syslog(pamh, LOG_DEBUG,
+                   "pam_hw: local session detected for user=%s, proceeding with hardware check",
+                   user);
+    }
+
+    /* Load identities */
+    hw_identity identities[MAX_IDENTITIES];
+    int identity_count = 0;
+    if (identities_load("/etc/pamhw/identities", identities, MAX_IDENTITIES, &identity_count) != 0) {
+        pam_syslog(pamh, LOG_WARNING, "pam_hw: identities_load failed");
+        return PAM_IGNORE;
+    }
+
+    if (identity_count == MAX_IDENTITIES) {
+        pam_syslog(pamh, LOG_WARNING,
+                   "pam_hw: identities capacity reached (%d), extra entries ignored",
+                   MAX_IDENTITIES);
+    }
+
+    if (cfg.debug) {
+        pam_syslog(pamh, LOG_DEBUG, "pam_hw: loaded %d identities", identity_count);
+    }
+
+    /* Scan USB devices */
+    hw_usb_device devices[MAX_DEVICES];
+    int device_count = 0;
+    if (usb_scan(cfg.sys_root, devices, MAX_DEVICES, &device_count) != 0) {
+        pam_syslog(pamh, LOG_WARNING, "pam_hw: usb_scan failed");
+        return PAM_IGNORE;
+    }
+
+    if (device_count == MAX_DEVICES) {
+        pam_syslog(pamh, LOG_WARNING,
+                   "pam_hw: device capacity reached (%d), extra devices ignored",
+                   MAX_DEVICES);
+    }
+
+    if (cfg.debug) {
+        pam_syslog(pamh, LOG_DEBUG, "pam_hw: found %d USB devices", device_count);
+    }
+
+    /* Evaluate hardware presence */
+    int result = pamhw_evaluate(&cfg, identities, identity_count, user, devices, device_count);
+
+    if (cfg.debug) {
+        const char *result_str = (result == PAM_SUCCESS) ? "PAM_SUCCESS" :
+                                 (result == PAM_IGNORE) ? "PAM_IGNORE" :
+                                 (result == PAM_AUTH_ERR) ? "PAM_AUTH_ERR" : "UNKNOWN";
+        pam_syslog(pamh, LOG_DEBUG, "pam_hw: evaluation result: %s", result_str);
+    }
+
+    return result;
 }
 
 PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh, int flags,
@@ -19,5 +121,5 @@ PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh, int flags,
     (void)flags;
     (void)argc;
     (void)argv;
-    return PAM_IGNORE;
+    return PAM_SUCCESS;
 }

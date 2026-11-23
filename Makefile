@@ -11,6 +11,7 @@ TEST_BIN = tests/run_tests
 
 # Source files
 MODULE_SRC = src/pam_hw.c
+CORE_SRC = src/config.c src/identities.c src/usb_detect.c src/evaluate.c
 PROBE_SRC = probe/main.c
 TEST_SRC = tests/test_main.c tests/test_smoke.c tests/test_identities.c tests/test_config.c tests/test_usb_detect.c tests/test_evaluate.c
 
@@ -19,8 +20,8 @@ TEST_SRC = tests/test_main.c tests/test_smoke.c tests/test_identities.c tests/te
 all: $(MODULE) $(PROBE) $(TEST_BIN)
 
 # PAM module (shared library)
-$(MODULE): $(MODULE_SRC)
-	$(CC) $(CFLAGS) -fPIC -shared -o $@ $< $(LDFLAGS)
+$(MODULE): $(MODULE_SRC) $(CORE_SRC)
+	$(CC) $(CFLAGS) -fPIC -shared -o $@ $(MODULE_SRC) $(CORE_SRC) $(LDFLAGS)
 
 # Probe utility
 $(PROBE): $(PROBE_SRC)
