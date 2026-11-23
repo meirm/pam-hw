@@ -150,3 +150,7 @@ int pamhw_evaluate(const hw_config *cfg, const hw_identity *l, int n,
     }
     return PAM_IGNORE;
 }
+
+int pamhw_internal_error_result(const hw_config *cfg) {
+    return (strcmp(cfg->mode, "mandatory") == 0) ? PAM_AUTH_ERR : PAM_IGNORE;
+}

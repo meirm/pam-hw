@@ -41,12 +41,7 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
     const char *tty = NULL;
     const char *service = NULL;
 
-    /* Fetch PAM items (all can be NULL) */
-    if (pam_get_user(pamh, &user, NULL) != PAM_SUCCESS || user == NULL) {
-        pam_syslog(pamh, LOG_WARNING, "pam_hw: failed to get PAM_USER, returning PAM_IGNORE");
-        return PAM_IGNORE;
-    }
-
+    /* Fetch session items (all can be NULL) */
     pam_get_item(pamh, PAM_RHOST, (const void **)&rhost);
     pam_get_item(pamh, PAM_TTY, (const void **)&tty);
     pam_get_item(pamh, PAM_SERVICE, (const void **)&service);
@@ -54,7 +49,7 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
     /*
      * Two-phase local-only guard:
      * Phase 1 (PRE-CONFIG): Check rhost/tty remote markers with empty whitelist.
-     *   Rejects remote sessions before any filesystem I/O.
+     *   Rejects remote sessions before any filesystem I/O, regardless of mode.
      * Phase 2 (POST-CONFIG): Apply cfg.services whitelist after config load.
      */
     if (!pamhw_local_only(rhost, tty, service, "")) {
@@ -66,11 +61,11 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
         return PAM_IGNORE;
     }
 
-    /* Load configuration */
+    /* Load configuration first so every internal error can follow the mode */
     hw_config cfg;
     if (config_load("/etc/pamhw/pamhw.conf", &cfg, config_warn_syslog, pamh) != 0) {
         pam_syslog(pamh, LOG_ERR, "pam_hw: config_load failed");
-        return PAM_IGNORE;
+        return pamhw_internal_error_result(&cfg);
     }
 
     /* Phase 2: Apply service whitelist if configured */
@@ -82,6 +77,11 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
                        service ? service : "(null)");
         }
         return PAM_IGNORE;
+    }
+
+    if (pam_get_user(pamh, &user, NULL) != PAM_SUCCESS || user == NULL) {
+        pam_syslog(pamh, LOG_WARNING, "pam_hw: failed to get PAM_USER");
+        return pamhw_internal_error_result(&cfg);
     }
 
     if (cfg.debug) {
@@ -96,7 +96,7 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
     if (identities_load("/etc/pamhw/identities", identities, MAX_IDENTITIES, &identity_count,
                         identities_warn_syslog, pamh) != 0) {
         pam_syslog(pamh, LOG_WARNING, "pam_hw: identities_load failed");
-        return PAM_IGNORE;
+        return pamhw_internal_error_result(&cfg);
     }
 
     if (identity_count == MAX_IDENTITIES) {
@@ -114,7 +114,7 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
     int device_count = 0;
     if (usb_scan(cfg.sys_root, devices, MAX_DEVICES, &device_count) != 0) {
         pam_syslog(pamh, LOG_WARNING, "pam_hw: usb_scan failed");
-        return PAM_IGNORE;
+        return pamhw_internal_error_result(&cfg);
     }
 
     if (device_count == MAX_DEVICES) {

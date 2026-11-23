@@ -426,3 +426,15 @@ T(verify_secret_deny_does_not_poison_pass) {
     hw_usb_device devs[2] = { { .ident = "0a12:0001" }, { .ident = "1234:5678" } };
     EXPECT_INT_EQ(PAM_SUCCESS, pamhw_evaluate(&cfg, ids, 2, "alice", devs, 2));
 }
+
+/* === Internal errors follow the mode (M4) === */
+
+/* Test: internal error ⇒ PAM_IGNORE in sufficient mode, PAM_AUTH_ERR in mandatory mode */
+T(internal_error_result_per_mode) {
+    hw_config cfg = { .mode = "sufficient" };
+    EXPECT_INT_EQ(PAM_IGNORE, pamhw_internal_error_result(&cfg));
+    snprintf(cfg.mode, sizeof(cfg.mode), "mandatory");
+    EXPECT_INT_EQ(PAM_AUTH_ERR, pamhw_internal_error_result(&cfg));
+    cfg.mode[0] = '\0';
+    EXPECT_INT_EQ(PAM_IGNORE, pamhw_internal_error_result(&cfg));
+}

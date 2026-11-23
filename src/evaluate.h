@@ -64,4 +64,11 @@ int pamhw_local_only(const char *rhost, const char *tty,
 int pamhw_evaluate(const hw_config *cfg, const hw_identity *l, int n,
                    const char *user, const hw_usb_device *devs, int ndevs);
 
+/*
+ * pamhw_internal_error_result: PAM result for an internal error / timeout
+ * (behavior matrix): mandatory ⇒ PAM_AUTH_ERR, otherwise PAM_IGNORE.
+ * Not used for remote sessions, which are PAM_IGNORE regardless of mode.
+ */
+int pamhw_internal_error_result(const hw_config *cfg);
+
 #endif /* EVALUATE_H */
