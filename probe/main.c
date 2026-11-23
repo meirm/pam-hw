@@ -17,6 +17,36 @@
 #include "../src/config.h"
 #include "../src/identities.h"
 
+/* Test instrumentation: allow env override of uid functions */
+#ifdef PAMHW_TEST
+static uid_t test_geteuid(void) {
+    const char *env = getenv("PAMHW_TEST_EUID");
+    if (env && *env) {
+        char *endptr;
+        long parsed = strtol(env, &endptr, 10);
+        if (*endptr == '\0' && parsed >= 0 && parsed <= 65535) {
+            return (uid_t)parsed;
+        }
+    }
+    return geteuid();
+}
+
+static uid_t test_getuid(void) {
+    const char *env = getenv("PAMHW_TEST_UID");
+    if (env && *env) {
+        char *endptr;
+        long parsed = strtol(env, &endptr, 10);
+        if (*endptr == '\0' && parsed >= 0 && parsed <= 65535) {
+            return (uid_t)parsed;
+        }
+    }
+    return getuid();
+}
+#else
+#define test_geteuid() geteuid()
+#define test_getuid() getuid()
+#endif
+
 static void usage(FILE *out) {
     fprintf(out, "Usage: pam-hw-probe <command> [options]\n");
     fprintf(out, "Commands:\n");
@@ -46,7 +76,7 @@ static int resolve_invoker(char *username, size_t size, int *is_root) {
     const char *sudo_uid_str = getenv("SUDO_UID");
     
     /* Root status is ONLY based on real uid, not SUDO_UID */
-    *is_root = (getuid() == 0);
+    *is_root = (test_getuid() == 0);
     
     /* Invoker username comes from SUDO_UID if present, else real uid */
     if (sudo_uid_str && *sudo_uid_str) {
@@ -55,10 +85,10 @@ static int resolve_invoker(char *username, size_t size, int *is_root) {
         if (*endptr == '\0' && parsed >= 0 && parsed <= 65535) {
             uid = (uid_t)parsed;
         } else {
-            uid = getuid();
+            uid = test_getuid();
         }
     } else {
-        uid = getuid();
+        uid = test_getuid();
     }
     
     return get_username(uid, username, size);
@@ -125,7 +155,7 @@ static int cmd_list(int argc, char **argv) {
     /* Get current username for --mine */
     char username[64] = {0};
     if (mine_flag) {
-        uid_t uid = getuid();
+        uid_t uid = test_getuid();
         struct passwd *pw = getpwuid(uid);
         if (!pw) {
             fprintf(stderr, "Error: could not determine current user\n");
@@ -192,7 +222,7 @@ static int cmd_list(int argc, char **argv) {
 
 /* Command: add */
 static int cmd_add(int argc, char **argv) {
-    if (geteuid() != 0) {
+    if (test_geteuid() != 0) {
         fprintf(stderr, "Error: enrollment changes require sudo\n");
         return 1;
     }
@@ -392,7 +422,7 @@ static int cmd_add(int argc, char **argv) {
 
 /* Command: remove */
 static int cmd_remove(int argc, char **argv) {
-    if (geteuid() != 0) {
+    if (test_geteuid() != 0) {
         fprintf(stderr, "Error: enrollment changes require sudo\n");
         return 1;
     }

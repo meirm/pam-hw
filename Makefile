@@ -7,6 +7,7 @@ LDFLAGS = -lpam
 # Targets
 MODULE = pam_hw.so
 PROBE = pam-hw-probe
+PROBE_TEST = pam-hw-probe-test
 TEST_BIN = tests/run_tests
 
 # Source files
@@ -27,12 +28,16 @@ $(MODULE): $(MODULE_SRC) $(CORE_SRC)
 $(PROBE): $(PROBE_SRC) src/config.c src/identities.c src/usb_detect.c
 	$(CC) $(CFLAGS) -o $@ $^
 
+# Test-instrumented probe (NOT built by default, NOT installed)
+$(PROBE_TEST): $(PROBE_SRC) src/config.c src/identities.c src/usb_detect.c
+	$(CC) $(CFLAGS) -DPAMHW_TEST -o $@ $^
+
 # Test binary
 $(TEST_BIN): $(TEST_SRC) src/identities.c src/config.c src/usb_detect.c src/evaluate.c
 	$(CC) $(CFLAGS) -I tests -o $@ $(TEST_SRC) src/identities.c src/config.c src/usb_detect.c src/evaluate.c
 
 # Run tests
-test: $(TEST_BIN)
+test: $(TEST_BIN) $(PROBE) $(PROBE_TEST)
 	./$(TEST_BIN)
 
 # Install/uninstall stubs (finalized in Task 9)
@@ -44,4 +49,4 @@ uninstall:
 
 # Clean build artifacts
 clean:
-	rm -f $(MODULE) $(PROBE) $(TEST_BIN)
+	rm -f $(MODULE) $(PROBE) $(PROBE_TEST) $(TEST_BIN)
