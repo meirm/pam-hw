@@ -12,7 +12,7 @@ TEST_BIN = tests/run_tests
 # Source files
 MODULE_SRC = src/pam_hw.c
 PROBE_SRC = probe/main.c
-TEST_SRC = tests/test_main.c tests/test_smoke.c
+TEST_SRC = tests/test_main.c tests/test_smoke.c tests/test_identities.c
 
 .PHONY: all test install uninstall clean
 
@@ -27,8 +27,8 @@ $(PROBE): $(PROBE_SRC)
 	$(CC) $(CFLAGS) -o $@ $<
 
 # Test binary
-$(TEST_BIN): $(TEST_SRC)
-	$(CC) $(CFLAGS) -I tests -o $@ $(TEST_SRC)
+$(TEST_BIN): $(TEST_SRC) src/identities.c
+	$(CC) $(CFLAGS) -I tests -o $@ $(TEST_SRC) src/identities.c
 
 # Run tests
 test: $(TEST_BIN)
