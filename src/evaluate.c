@@ -23,6 +23,13 @@ static int service_in_whitelist(const char *service, const char *whitelist) {
     while (token) {
         /* Strip leading/trailing spaces */
         while (*token == ' ') token++;
+        
+        /* Skip empty segments (e.g., from "sudo,,login" or " ") */
+        if (*token == '\0') {
+            token = strtok(NULL, ",");
+            continue;
+        }
+        
         char *end = token + strlen(token) - 1;
         while (end > token && *end == ' ') *end-- = '\0';
         

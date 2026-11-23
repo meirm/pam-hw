@@ -290,3 +290,89 @@ T(local_only_ipv6_loopback) {
     int result = pamhw_local_only("::1", "tty1", "sudo", "");
     EXPECT_INT_EQ(1, result);
 }
+
+/* C1: Test HW_BT line ignored in R1 (sufficient mode) */
+T(bt_line_ignored) {
+    hw_config cfg = { .mode = "sufficient" };
+    
+    hw_identity ids[1] = {
+        { .type = HW_BT, .ident = "00:11:22:33:44:55", .user = "alice" }
+    };
+    
+    hw_usb_device devs[1] = {
+        { .ident = "046d:c52b:DIFFERENT" }
+    };
+    
+    /* BT line never passes in R1, returns IGNORE */
+    int result = pamhw_evaluate(&cfg, ids, 1, "alice", devs, 1);
+    EXPECT_INT_EQ(PAM_IGNORE, result);
+}
+
+/* C1: Test HW_BT line in mandatory mode */
+T(bt_line_mandatory) {
+    hw_config cfg = { .mode = "mandatory" };
+    
+    hw_identity ids[1] = {
+        { .type = HW_BT, .ident = "00:11:22:33:44:55", .user = "alice", .mode = "mandatory" }
+    };
+    
+    hw_usb_device devs[1] = {
+        { .ident = "046d:c52b:DIFFERENT" }
+    };
+    
+    /* BT line in mandatory mode: line returns IGNORE, not ABSENT */
+    /* Current behavior: IGNORE doesn't trigger has_mandatory_absent, returns PAM_IGNORE */
+    int result = pamhw_evaluate(&cfg, ids, 1, "alice", devs, 1);
+    EXPECT_INT_EQ(PAM_IGNORE, result);
+}
+
+/* I2: Unknown mode string fails open as sufficient */
+T(unknown_mode_sufficient_default) {
+    hw_config cfg = { .mode = "mandator" };  /* Typo: not "mandatory" */
+    
+    hw_identity ids[1] = {
+        { .type = HW_USB, .ident = "046d:c52b:SERIAL123", .user = "alice" }
+    };
+    
+    hw_usb_device devs[1] = {
+        { .ident = "1234:5678:DIFFERENT" }  /* Device absent */
+    };
+    
+    /* Unknown mode treated as sufficient, absent device ⇒ PAM_IGNORE */
+    int result = pamhw_evaluate(&cfg, ids, 1, "alice", devs, 1);
+    EXPECT_INT_EQ(PAM_IGNORE, result);
+}
+
+/* I3: Whitelist space handling - service in whitelist with spaces */
+T(local_only_whitelist_spaces) {
+    /* Space after comma */
+    int result1 = pamhw_local_only("", "tty1", "sudo", "sudo, login");
+    EXPECT_INT_EQ(1, result1);
+    
+    /* Spaces around entries */
+    int result2 = pamhw_local_only("", "tty1", "login", " sudo , login ");
+    EXPECT_INT_EQ(1, result2);
+    
+    /* Service not in whitelist with spaces */
+    int result3 = pamhw_local_only("", "tty1", "cron", "sudo, login");
+    EXPECT_INT_EQ(0, result3);
+}
+
+/* I1: Whitelist with empty segments (edge case) */
+T(local_only_whitelist_empty_segments) {
+    /* Double comma creates empty segment */
+    int result1 = pamhw_local_only("", "tty1", "login", "sudo,,login");
+    EXPECT_INT_EQ(1, result1);
+    
+    /* Space-only segments */
+    int result2 = pamhw_local_only("", "tty1", "sudo", "sudo, , login");
+    EXPECT_INT_EQ(1, result2);
+    
+    /* NULL service with non-empty whitelist steps aside */
+    int result3 = pamhw_local_only("", "tty1", NULL, "sudo,login");
+    EXPECT_INT_EQ(0, result3);
+    
+    /* NULL service with empty whitelist proceeds */
+    int result4 = pamhw_local_only("", "tty1", NULL, "");
+    EXPECT_INT_EQ(1, result4);
+}
