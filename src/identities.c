@@ -31,9 +31,12 @@ static int is_attr(const char *field, const char *name) {
 
 /* Helper: copy string safely with truncation */
 static void safe_strcpy(char *dest, const char *src, size_t size) {
+    int ret;
     if (size == 0) return;
-    strncpy(dest, src, size - 1);
-    dest[size - 1] = '\0';
+    ret = snprintf(dest, size, "%s", src);
+    if (ret < 0 || (size_t)ret >= size) {
+        dest[size - 1] = '\0';  /* Explicit truncation */
+    }
 }
 
 int identities_normalize(hw_type t, const char *raw, char *out, int max) {

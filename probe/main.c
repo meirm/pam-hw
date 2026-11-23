@@ -481,7 +481,7 @@ static int cmd_remove(int argc, char **argv) {
         
         /* Audit log */
         openlog("pamhw-probe", LOG_PID, LOG_AUTHPRIV);
-        syslog(LOG_NOTICE, "remove %s -> %s by %s", ident_arg, invoker, invoker);
+        syslog(LOG_NOTICE, "remove %s by %s", ident_arg, invoker);
         closelog();
     }
     

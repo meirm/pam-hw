@@ -12,9 +12,12 @@
 
 /* Helper: copy string safely with truncation */
 static void safe_strcpy(char *dest, const char *src, size_t size) {
+    int ret;
     if (size == 0) return;
-    strncpy(dest, src, size - 1);
-    dest[size - 1] = '\0';
+    ret = snprintf(dest, size, "%s", src);
+    if (ret < 0 || (size_t)ret >= size) {
+        dest[size - 1] = '\0';  /* Explicit truncation */
+    }
 }
 
 /* Helper: trim trailing whitespace (newlines) in place */
@@ -105,6 +108,7 @@ int usb_scan(const char *sys_root, hw_usb_device *out, int max, int *count) {
         char dev_path[512];
         char buf[256];
         hw_usb_device dev;
+        int ret;
         
         /* Skip . and .. */
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
@@ -120,7 +124,10 @@ int usb_scan(const char *sys_root, hw_usb_device *out, int max, int *count) {
         memset(&dev, 0, sizeof(dev));
         
         /* Read idVendor */
-        snprintf(dev_path, sizeof(dev_path), "%s/%s/idVendor", devices_path, entry->d_name);
+        ret = snprintf(dev_path, sizeof(dev_path), "%s/%s/idVendor", devices_path, entry->d_name);
+        if (ret < 0 || (size_t)ret >= sizeof(dev_path)) {
+            dev_path[sizeof(dev_path)-1] = '\0';  /* Explicit truncation */
+        }
         if (read_sysfs_file(dev_path, buf, sizeof(buf)) != 0) {
             continue;  /* Skip if idVendor missing */
         }
@@ -128,7 +135,10 @@ int usb_scan(const char *sys_root, hw_usb_device *out, int max, int *count) {
         to_lowercase(dev.vendor);
         
         /* Read idProduct */
-        snprintf(dev_path, sizeof(dev_path), "%s/%s/idProduct", devices_path, entry->d_name);
+        ret = snprintf(dev_path, sizeof(dev_path), "%s/%s/idProduct", devices_path, entry->d_name);
+        if (ret < 0 || (size_t)ret >= sizeof(dev_path)) {
+            dev_path[sizeof(dev_path)-1] = '\0';  /* Explicit truncation */
+        }
         if (read_sysfs_file(dev_path, buf, sizeof(buf)) != 0) {
             continue;  /* Skip if idProduct missing */
         }
@@ -136,7 +146,10 @@ int usb_scan(const char *sys_root, hw_usb_device *out, int max, int *count) {
         to_lowercase(dev.product);
         
         /* Read serial (optional) */
-        snprintf(dev_path, sizeof(dev_path), "%s/%s/serial", devices_path, entry->d_name);
+        ret = snprintf(dev_path, sizeof(dev_path), "%s/%s/serial", devices_path, entry->d_name);
+        if (ret < 0 || (size_t)ret >= sizeof(dev_path)) {
+            dev_path[sizeof(dev_path)-1] = '\0';  /* Explicit truncation */
+        }
         if (read_sysfs_file(dev_path, buf, sizeof(buf)) == 0 && !is_garbage_serial(buf)) {
             safe_strcpy(dev.serial, buf, sizeof(dev.serial));
             dev.has_serial = 1;
@@ -146,7 +159,10 @@ int usb_scan(const char *sys_root, hw_usb_device *out, int max, int *count) {
         }
         
         /* Read product name (optional) */
-        snprintf(dev_path, sizeof(dev_path), "%s/%s/product", devices_path, entry->d_name);
+        ret = snprintf(dev_path, sizeof(dev_path), "%s/%s/product", devices_path, entry->d_name);
+        if (ret < 0 || (size_t)ret >= sizeof(dev_path)) {
+            dev_path[sizeof(dev_path)-1] = '\0';  /* Explicit truncation */
+        }
         if (read_sysfs_file(dev_path, buf, sizeof(buf)) == 0) {
             safe_strcpy(dev.name, buf, sizeof(dev.name));
         } else {
@@ -155,11 +171,17 @@ int usb_scan(const char *sys_root, hw_usb_device *out, int max, int *count) {
         
         /* Build identifier: vid:pid or vid:pid:serial */
         if (dev.has_serial) {
-            snprintf(dev.ident, sizeof(dev.ident), "%s:%s:%s", 
+            ret = snprintf(dev.ident, sizeof(dev.ident), "%s:%s:%s", 
                      dev.vendor, dev.product, dev.serial);
+            if (ret < 0 || (size_t)ret >= sizeof(dev.ident)) {
+                dev.ident[sizeof(dev.ident)-1] = '\0';  /* Explicit truncation */
+            }
         } else {
-            snprintf(dev.ident, sizeof(dev.ident), "%s:%s", 
+            ret = snprintf(dev.ident, sizeof(dev.ident), "%s:%s", 
                      dev.vendor, dev.product);
+            if (ret < 0 || (size_t)ret >= sizeof(dev.ident)) {
+                dev.ident[sizeof(dev.ident)-1] = '\0';  /* Explicit truncation */
+            }
         }
         
         /* Add to output array */

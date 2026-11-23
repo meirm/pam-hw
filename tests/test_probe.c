@@ -217,11 +217,15 @@ T(probe_list_basic) {
     mkdir(sysfs, 0755);
     
     char devices_dir[512];
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus", sysfs);
+    int ret;
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb", sysfs);
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb/devices", sysfs);
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb/devices", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
     
     fake_usb(devices_dir, "1-1", "046d", "c52b", "ABC123", "Logitech Mouse");
@@ -262,11 +266,15 @@ T(probe_list_enrolled) {
     mkdir(sysfs, 0755);
     
     char devices_dir[512];
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus", sysfs);
+    int ret;
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb", sysfs);
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb/devices", sysfs);
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb/devices", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
     
     fake_usb(devices_dir, "1-1", "046d", "c52b", "ABC123", "Test Device");
@@ -311,11 +319,15 @@ T(probe_list_mine) {
     mkdir(sysfs, 0755);
     
     char devices_dir[512];
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus", sysfs);
+    int ret;
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb", sysfs);
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb/devices", sysfs);
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb/devices", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
     
     fake_usb(devices_dir, "1-1", "046d", "c52b", "MINE", "My Device");
@@ -372,11 +384,15 @@ T(probe_list_empty) {
     mkdir(sysfs, 0755);
     
     char devices_dir[512];
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus", sysfs);
+    int ret;
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb", sysfs);
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb/devices", sysfs);
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb/devices", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
     
     /* No devices */
@@ -417,11 +433,15 @@ T(probe_list_output_format) {
     mkdir(sysfs, 0755);
     
     char devices_dir[512];
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus", sysfs);
+    int ret;
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb", sysfs);
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb/devices", sysfs);
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb/devices", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
     
     fake_usb(devices_dir, "1-1", "046d", "c52b", "ABC", "Test Product");
@@ -700,11 +720,15 @@ T(probe_add_auto_nodev) {
     mkdir(sysfs, 0755);
     
     char devices_dir[512];
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus", sysfs);
+    int ret;
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb", sysfs);
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb/devices", sysfs);
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb/devices", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
     
     char conf_path[512];
@@ -740,11 +764,15 @@ T(probe_add_auto_ambiguous) {
     mkdir(sysfs, 0755);
     
     char devices_dir[512];
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus", sysfs);
+    int ret;
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb", sysfs);
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb/devices", sysfs);
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb/devices", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
     
     fake_usb(devices_dir, "1-1", "1234", "5678", NULL, "Device 1");
@@ -785,11 +813,15 @@ T(probe_add_auto_single) {
     mkdir(sysfs, 0755);
     
     char devices_dir[512];
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus", sysfs);
+    int ret;
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb", sysfs);
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
-    snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb/devices", sysfs);
+    ret = snprintf(devices_dir, sizeof(devices_dir), "%s/bus/usb/devices", sysfs);
+    if (ret < 0 || (size_t)ret >= sizeof(devices_dir)) devices_dir[sizeof(devices_dir)-1] = '\0';
     mkdir(devices_dir, 0755);
     
     fake_usb(devices_dir, "1-1", "1234", "5678", "SER123", "Test Device");

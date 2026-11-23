@@ -24,6 +24,7 @@ static inline void remove_tree(const char *path) {
     struct dirent *entry;
     char fullpath[2048];
     struct stat statbuf;
+    int ret;
     
     if (!path) return;
     
@@ -34,7 +35,10 @@ static inline void remove_tree(const char *path) {
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
             continue;
         
-        snprintf(fullpath, sizeof(fullpath), "%s/%s", path, entry->d_name);
+        ret = snprintf(fullpath, sizeof(fullpath), "%s/%s", path, entry->d_name);
+        if (ret < 0 || (size_t)ret >= sizeof(fullpath)) {
+            fullpath[sizeof(fullpath)-1] = '\0';  /* Explicit truncation */
+        }
         
         if (stat(fullpath, &statbuf) == 0) {
             if (S_ISDIR(statbuf.st_mode)) {
