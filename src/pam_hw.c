@@ -26,11 +26,14 @@ static void config_warn_syslog(void *ctx, int line_no, const char *reason) {
     pam_syslog((pam_handle_t *)ctx, LOG_WARNING, "pam_hw: pamhw.conf:%d: %s", line_no, reason);
 }
 
+/* The module is built with -fvisibility=hidden: only the PAM entry points are exported */
+#define PAMHW_EXPORT __attribute__((visibility("default")))
+
 /* Capacity limits for fixed-size arrays */
 #define MAX_IDENTITIES 64
 #define MAX_DEVICES 64
 
-PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
+PAMHW_EXPORT PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
                                    int argc, const char **argv) {
     (void)flags;
     (void)argc;
@@ -140,7 +143,7 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
     return result;
 }
 
-PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh, int flags,
+PAMHW_EXPORT PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh, int flags,
                               int argc, const char **argv) {
     (void)pamh;
     (void)flags;
