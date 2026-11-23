@@ -1,0 +1,588 @@
+/*
+ * probe/main.c — USB device probe utility for pam-hw
+ * 
+ * Lists connected USB devices with enrollment annotations.
+ * Interfaces: consumes usb_scan, config_load, identities_load.
+ */
+#define _DEFAULT_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <pwd.h>
+#include <syslog.h>
+#include <errno.h>
+#include <ctype.h>
+#include <stdint.h>
+#include "../src/usb_detect.h"
+#include "../src/config.h"
+#include "../src/identities.h"
+
+/* Test instrumentation: allow env override of uid functions */
+#ifdef PAMHW_TEST
+static uid_t test_geteuid(void) {
+    const char *env = getenv("PAMHW_TEST_EUID");
+    if (env && *env) {
+        char *endptr;
+        long parsed = strtol(env, &endptr, 10);
+        if (*endptr == '\0' && parsed >= 0 && parsed <= 65535) {
+            return (uid_t)parsed;
+        }
+    }
+    return geteuid();
+}
+
+static uid_t test_getuid(void) {
+    const char *env = getenv("PAMHW_TEST_UID");
+    if (env && *env) {
+        char *endptr;
+        long parsed = strtol(env, &endptr, 10);
+        if (*endptr == '\0' && parsed >= 0 && parsed <= 65535) {
+            return (uid_t)parsed;
+        }
+    }
+    return getuid();
+}
+#else
+#define test_geteuid() geteuid()
+#define test_getuid() getuid()
+#endif
+
+static void usage(FILE *out) {
+    fprintf(out, "Usage: pam-hw-probe <command> [options]\n");
+    fprintf(out, "Commands:\n");
+    fprintf(out, "  list [options]                List USB devices\n");
+    fprintf(out, "  add <ident|AUTO> [options]    Enroll device\n");
+    fprintf(out, "  remove <ident|all>            Remove enrollment\n");
+    fprintf(out, "\nOptions:\n");
+    fprintf(out, "  --mine                        Show the invoking user's identity lines\n");
+    fprintf(out, "  --user NAME                   Target username (root only)\n");
+    fprintf(out, "  --verify[=]presence|secret|sign  Verification method (default: presence)\n");
+    fprintf(out, "  --conf PATH                   Configuration file (root only)\n");
+    fprintf(out, "  --sys-root DIR                Override sysfs root (root only)\n");
+    fprintf(out, "  --identities PATH             Override identities file (root only)\n");
+}
+
+/* Parser warning sink: malformed identities lines go to stderr */
+static void identities_warn_stderr(void *ctx, int line_no, const char *reason) {
+    fprintf(stderr, "Warning: %s:%d: malformed line, skipped (%s)\n",
+            (const char *)ctx, line_no, reason);
+}
+
+/* Parser warning sink: rejected configuration values go to stderr */
+static void config_warn_stderr(void *ctx, int line_no, const char *reason) {
+    fprintf(stderr, "Warning: %s:%d: %s\n", (const char *)ctx, line_no, reason);
+}
+
+/* Helper: get invoker username from uid */
+static int get_username(uid_t uid, char *buf, size_t size) {
+    struct passwd *pw = getpwuid(uid);
+    if (!pw) return -1;
+    snprintf(buf, size, "%s", pw->pw_name);
+    return 0;
+}
+
+/*
+ * Helper: resolve the invoking uid. Under sudo the real uid is 0, so the
+ * invoker comes from SUDO_UID when present; otherwise the real uid.
+ * SUDO_UID must be plain decimal digits within uid_t range; anything else
+ * is an error (never a silent fallback to the real uid, which is root).
+ * Returns 0 on success, -1 on malformed SUDO_UID.
+ */
+static int resolve_invoker_uid(uid_t *uid) {
+    const char *sudo_uid_str = getenv("SUDO_UID");
+
+    if (!sudo_uid_str) {
+        *uid = test_getuid();
+        return 0;
+    }
+
+    if (*sudo_uid_str == '\0') return -1;
+    for (const char *p = sudo_uid_str; *p; p++) {
+        if (!isdigit((unsigned char)*p)) return -1;
+    }
+
+    errno = 0;
+    char *endptr;
+    unsigned long long parsed = strtoull(sudo_uid_str, &endptr, 10);
+    if (errno != 0 || *endptr != '\0' || parsed > UINT32_MAX) return -1;
+
+    *uid = (uid_t)parsed;
+    return 0;
+}
+
+/*
+ * Helper: resolve invoker identity. is_root is derived from the same
+ * invoking uid that names the invoker, so every self-service limit
+ * applies under sudo. Returns 0 on success, -1 on error (message printed).
+ */
+static int resolve_invoker(char *username, size_t size, int *is_root) {
+    uid_t uid;
+
+    if (resolve_invoker_uid(&uid) != 0) {
+        fprintf(stderr, "Error: invalid SUDO_UID\n");
+        return -1;
+    }
+
+    *is_root = (uid == 0);
+
+    if (get_username(uid, username, size) != 0) {
+        fprintf(stderr, "Error: could not determine invoker identity\n");
+        return -1;
+    }
+    return 0;
+}
+
+/*
+ * Path overrides (--conf, --identities, --sys-root) redirect root-privileged
+ * reads and the atomic identities rewrite, so outside the test-instrumented
+ * build they are honored only when the invoker itself is root.
+ * Returns 0 if allowed, -1 (message printed) if refused.
+ */
+static int check_path_override(const char *flag) {
+    if (!flag) return 0;
+#ifdef PAMHW_TEST
+    return 0;
+#else
+    uid_t uid;
+    if (resolve_invoker_uid(&uid) == 0 && uid == 0) return 0;
+    fprintf(stderr, "Error: %s is only honored for root\n", flag);
+    return -1;
+#endif
+}
+
+/* Command: list */
+static int cmd_list(int argc, char **argv) {
+    const char *conf_path = "/etc/pamhw/pamhw.conf";
+    const char *sys_root_override = NULL;
+    const char *identities_path = "/etc/pamhw/identities";
+    const char *override_flag = NULL;
+    int mine_flag = 0;
+    int i;
+    
+    /* Parse flags */
+    for (i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--mine") == 0) {
+            mine_flag = 1;
+        } else if (strcmp(argv[i], "--conf") == 0) {
+            if (++i >= argc) {
+                fprintf(stderr, "Error: --conf requires an argument\n");
+                usage(stderr);
+                return 2;
+            }
+            conf_path = argv[i];
+            override_flag = "--conf";
+        } else if (strcmp(argv[i], "--sys-root") == 0) {
+            if (++i >= argc) {
+                fprintf(stderr, "Error: --sys-root requires an argument\n");
+                usage(stderr);
+                return 2;
+            }
+            sys_root_override = argv[i];
+            override_flag = "--sys-root";
+        } else if (strcmp(argv[i], "--identities") == 0) {
+            if (++i >= argc) {
+                fprintf(stderr, "Error: --identities requires an argument\n");
+                usage(stderr);
+                return 2;
+            }
+            identities_path = argv[i];
+            override_flag = "--identities";
+        } else {
+            fprintf(stderr, "Error: unknown option: %s\n", argv[i]);
+            usage(stderr);
+            return 2;
+        }
+    }
+    
+    if (check_path_override(override_flag) != 0) return 1;
+    
+    /* Load configuration */
+    hw_config cfg;
+    if (config_load(conf_path, &cfg, config_warn_stderr, (void *)conf_path) != 0) {
+        fprintf(stderr, "Error: failed to load configuration\n");
+        return 1;
+    }
+    
+    /* Apply sys_root override if provided */
+    const char *sys_root = sys_root_override ? sys_root_override : cfg.sys_root;
+    
+    /* Load identities */
+    hw_identity identities[256];
+    int identity_count = 0;
+    if (identities_load(identities_path, identities, 256, &identity_count,
+                        identities_warn_stderr, (void *)identities_path) != 0) {
+        fprintf(stderr, "Error: failed to load identities\n");
+        return 1;
+    }
+    
+    /* --mine: the invoking user's identity lines (connected or not, bt included) */
+    if (mine_flag) {
+        char username[64];
+        int is_root;
+        if (resolve_invoker(username, sizeof(username), &is_root) != 0) {
+            return 1;
+        }
+        for (i = 0; i < identity_count; i++) {
+            const hw_identity *id = &identities[i];
+            if (strcmp(id->user, username) != 0) continue;
+            printf("%s\t%s\t%s", id->type == HW_USB ? "usb" : "bt", id->ident, id->user);
+            if (id->verify[0]) printf("\tverify=%s", id->verify);
+            if (id->mode[0]) printf("\tmode=%s", id->mode);
+            if (id->pubkey[0]) printf("\tpubkey=%s", id->pubkey);
+            printf("\n");
+        }
+        return 0;
+    }
+    
+    /* Scan USB devices */
+    hw_usb_device devices[128];
+    int device_count = 0;
+    if (usb_scan(sys_root, devices, 128, &device_count) != 0) {
+        /* Scan errors are not fatal - just print nothing */
+        return 0;
+    }
+    
+    /* Print connected devices: usb <ident> # comments */
+    for (i = 0; i < device_count; i++) {
+        const hw_usb_device *dev = &devices[i];
+        
+        /* Find if this device is enrolled */
+        const hw_identity *enrolled = identities_find_device(
+            identities, identity_count, HW_USB, dev->ident);
+        
+        printf("usb\t%s", dev->ident);
+        
+        /* Add product name comment if available */
+        if (dev->name[0]) {
+            printf("\t# %s", dev->name);
+        }
+        
+        /* Add enrollment annotation if enrolled */
+        if (enrolled) {
+            /* Use separate comment segment for greppability */
+            if (dev->name[0]) {
+                printf("  # enrolled: %s", enrolled->user);
+            } else {
+                printf("\t# enrolled: %s", enrolled->user);
+            }
+        }
+        
+        printf("\n");
+    }
+    
+    return 0;
+}
+
+/* Command: add */
+static int cmd_add(int argc, char **argv) {
+    if (test_geteuid() != 0) {
+        fprintf(stderr, "Error: enrollment changes require sudo\n");
+        return 1;
+    }
+    
+    if (argc < 3) {
+        fprintf(stderr, "Error: add requires an identifier\n");
+        usage(stderr);
+        return 2;
+    }
+    
+    const char *ident_arg = argv[2];
+    const char *conf_path = "/etc/pamhw/pamhw.conf";
+    const char *sys_root_override = NULL;
+    const char *identities_path = "/etc/pamhw/identities";
+    const char *target_user = NULL;
+    const char *verify = "presence";
+    const char *override_flag = NULL;
+    int i;
+    
+    /* Parse options */
+    for (i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "--user") == 0) {
+            if (++i >= argc) {
+                fprintf(stderr, "Error: --user requires an argument\n");
+                return 2;
+            }
+            target_user = argv[i];
+        } else if (strcmp(argv[i], "--verify") == 0) {
+            if (++i >= argc) {
+                fprintf(stderr, "Error: --verify requires an argument\n");
+                return 2;
+            }
+            verify = argv[i];
+        } else if (strncmp(argv[i], "--verify=", 9) == 0) {
+            verify = argv[i] + 9;
+        } else if (strcmp(argv[i], "--conf") == 0) {
+            if (++i >= argc) {
+                fprintf(stderr, "Error: --conf requires an argument\n");
+                return 2;
+            }
+            conf_path = argv[i];
+            override_flag = "--conf";
+        } else if (strcmp(argv[i], "--sys-root") == 0) {
+            if (++i >= argc) {
+                fprintf(stderr, "Error: --sys-root requires an argument\n");
+                return 2;
+            }
+            sys_root_override = argv[i];
+            override_flag = "--sys-root";
+        } else if (strcmp(argv[i], "--identities") == 0) {
+            if (++i >= argc) {
+                fprintf(stderr, "Error: --identities requires an argument\n");
+                return 2;
+            }
+            identities_path = argv[i];
+            override_flag = "--identities";
+        } else {
+            fprintf(stderr, "Error: unknown option: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    
+    if (check_path_override(override_flag) != 0) return 1;
+    
+    /* R1 tier limit: only presence accepted */
+    if (strcmp(verify, "presence") != 0) {
+        fprintf(stderr, "Error: verification method '%s' arrives in R3/R4\n", verify);
+        return 1;
+    }
+    
+    /* Resolve invoker identity */
+    char invoker[64];
+    int is_root;
+    if (resolve_invoker(invoker, sizeof(invoker), &is_root) != 0) {
+        return 1;
+    }
+    
+    /* Determine target user */
+    char user[64];
+    if (target_user) {
+        /* --user specified */
+        if (!is_root && strcmp(target_user, invoker) != 0) {
+            fprintf(stderr, "Error: non-root users can only enroll their own devices\n");
+            return 1;
+        }
+        if (strlen(target_user) >= sizeof(user)) {
+            fprintf(stderr, "Error: username too long\n");
+            return 2;
+        }
+        snprintf(user, sizeof(user), "%s", target_user);
+    } else {
+        /* Default to invoker */
+        snprintf(user, sizeof(user), "%s", invoker);
+    }
+    
+    /* Load config */
+    hw_config cfg;
+    if (config_load(conf_path, &cfg, config_warn_stderr, (void *)conf_path) != 0) {
+        fprintf(stderr, "Error: failed to load configuration\n");
+        return 1;
+    }
+    
+    const char *sys_root = sys_root_override ? sys_root_override : cfg.sys_root;
+    
+    /* Load existing identities */
+    hw_identity identities[256];
+    int identity_count = 0;
+    identities_load(identities_path, identities, 256, &identity_count,
+                        identities_warn_stderr, (void *)identities_path);
+    
+    /* Resolve identifier */
+    char ident[128];
+    if (strcmp(ident_arg, "AUTO") == 0) {
+        /* AUTO: scan for exactly one unenrolled device */
+        hw_usb_device devices[128];
+        int device_count = 0;
+        if (usb_scan(sys_root, devices, 128, &device_count) != 0) {
+            fprintf(stderr, "Error: failed to scan USB devices\n");
+            return 1;
+        }
+        
+        /* Filter to unenrolled devices */
+        int unenrolled_idx = -1;
+        int unenrolled_count = 0;
+        for (i = 0; i < device_count; i++) {
+            const hw_identity *enrolled = identities_find_device(
+                identities, identity_count, HW_USB, devices[i].ident);
+            if (!enrolled) {
+                unenrolled_idx = i;
+                unenrolled_count++;
+            }
+        }
+        
+        if (unenrolled_count == 0) {
+            fprintf(stderr, "Error: AUTO requires at least one unenrolled device\n");
+            fprintf(stderr, "Connected devices:\n");
+            for (i = 0; i < device_count; i++) {
+                const hw_identity *enrolled = identities_find_device(
+                    identities, identity_count, HW_USB, devices[i].ident);
+                fprintf(stderr, "  usb %s", devices[i].ident);
+                if (enrolled) {
+                    fprintf(stderr, " (enrolled: %s)", enrolled->user);
+                }
+                fprintf(stderr, "\n");
+            }
+            return 1;
+        } else if (unenrolled_count > 1) {
+            fprintf(stderr, "Error: AUTO requires exactly one unenrolled device, found %d:\n", unenrolled_count);
+            for (i = 0; i < device_count; i++) {
+                const hw_identity *enrolled = identities_find_device(
+                    identities, identity_count, HW_USB, devices[i].ident);
+                if (!enrolled) {
+                    fprintf(stderr, "  usb %s", devices[i].ident);
+                    if (devices[i].name[0]) {
+                        fprintf(stderr, " # %s", devices[i].name);
+                    }
+                    fprintf(stderr, "\n");
+                }
+            }
+            return 1;
+        }
+        
+        /* Exactly one unenrolled device: must pass the same validation */
+        if (identities_normalize(HW_USB, devices[unenrolled_idx].ident, ident, sizeof(ident)) != 0) {
+            fprintf(stderr, "Error: device identifier cannot be enrolled: %s\n",
+                    devices[unenrolled_idx].ident);
+            return 1;
+        }
+    } else {
+        /* Normalize explicit identifier */
+        if (identities_normalize(HW_USB, ident_arg, ident, sizeof(ident)) != 0) {
+            fprintf(stderr, "Error: invalid identifier format: %s\n", ident_arg);
+            return 2;
+        }
+    }
+    
+    /* Build identity record */
+    hw_identity new_identity = {0};
+    new_identity.type = HW_USB;
+    snprintf(new_identity.ident, sizeof(new_identity.ident), "%s", ident);
+    snprintf(new_identity.user, sizeof(new_identity.user), "%s", user);
+    snprintf(new_identity.verify, sizeof(new_identity.verify), "%s", verify);
+    
+    /* Add identity */
+    int result = identities_add(identities, &identity_count, 256, &new_identity, invoker, is_root);
+    if (result == -1) {
+        /* Hijack attempt */
+        const hw_identity *existing = identities_find_device(identities, identity_count, HW_USB, ident);
+        if (existing) {
+            fprintf(stderr, "Error: device %s is already enrolled by user %s\n", ident, existing->user);
+        } else {
+            fprintf(stderr, "Error: could not add identity\n");
+        }
+        return 1;
+    } else if (result == -2) {
+        fprintf(stderr, "Error: non-root users can only manage their own devices\n");
+        return 1;
+    } else if (result == -3) {
+        fprintf(stderr, "Error: invalid username or identifier\n");
+        return 2;
+    }
+    
+    /* Save identities */
+    if (identities_save(identities_path, identities, identity_count) != 0) {
+        fprintf(stderr, "Error: failed to save identities file\n");
+        return 1;
+    }
+    
+    /* Audit log */
+    openlog("pamhw-probe", LOG_PID, LOG_AUTHPRIV);
+    syslog(LOG_NOTICE, "add %s -> %s by %s", ident, user, invoker);
+    closelog();
+    
+    return 0;
+}
+
+/* Command: remove */
+static int cmd_remove(int argc, char **argv) {
+    if (test_geteuid() != 0) {
+        fprintf(stderr, "Error: enrollment changes require sudo\n");
+        return 1;
+    }
+    
+    if (argc < 3) {
+        fprintf(stderr, "Error: remove requires an identifier or 'all'\n");
+        usage(stderr);
+        return 2;
+    }
+    
+    const char *ident_arg = argv[2];
+    const char *identities_path = "/etc/pamhw/identities";
+    const char *override_flag = NULL;
+    int i;
+    
+    /* Parse options */
+    for (i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "--identities") == 0) {
+            if (++i >= argc) {
+                fprintf(stderr, "Error: --identities requires an argument\n");
+                return 2;
+            }
+            identities_path = argv[i];
+            override_flag = "--identities";
+        } else {
+            fprintf(stderr, "Error: unknown option: %s\n", argv[i]);
+            return 2;
+        }
+    }
+    
+    if (check_path_override(override_flag) != 0) return 1;
+    
+    /* Resolve invoker identity */
+    char invoker[64];
+    int is_root;
+    if (resolve_invoker(invoker, sizeof(invoker), &is_root) != 0) {
+        return 1;
+    }
+    
+    /* Load existing identities */
+    hw_identity identities[256];
+    int identity_count = 0;
+    if (identities_load(identities_path, identities, 256, &identity_count,
+                        identities_warn_stderr, (void *)identities_path) != 0) {
+        /* Missing file is OK for remove */
+        return 0;
+    }
+    
+    /* Remove identity(-ies) */
+    int removed = identities_remove(identities, identity_count, ident_arg, invoker, is_root);
+    
+    if (removed > 0) {
+        identity_count -= removed;
+        
+        /* Save identities */
+        if (identities_save(identities_path, identities, identity_count) != 0) {
+            fprintf(stderr, "Error: failed to save identities file\n");
+            return 1;
+        }
+        
+        /* Audit log */
+        openlog("pamhw-probe", LOG_PID, LOG_AUTHPRIV);
+        syslog(LOG_NOTICE, "remove %s by %s", ident_arg, invoker);
+        closelog();
+    }
+    
+    return 0;
+}
+
+/* Main entry point */
+int main(int argc, char **argv) {
+    if (argc < 2) {
+        usage(stderr);
+        return 2;
+    }
+    
+    const char *cmd = argv[1];
+    
+    if (strcmp(cmd, "list") == 0) {
+        return cmd_list(argc, argv);
+    } else if (strcmp(cmd, "add") == 0) {
+        return cmd_add(argc, argv);
+    } else if (strcmp(cmd, "remove") == 0) {
+        return cmd_remove(argc, argv);
+    } else {
+        fprintf(stderr, "Error: unknown command: %s\n", cmd);
+        usage(stderr);
+        return 2;
+    }
+}
