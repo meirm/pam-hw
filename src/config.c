@@ -28,6 +28,32 @@ static void trim(char *s) {
     *p = '\0';
 }
 
+/*
+ * Helper: cut an inline comment in place. A '#' at line start or preceded
+ * by whitespace begins a comment; a '#' inside a token is kept.
+ */
+static void strip_inline_comment(char *s) {
+    for (char *p = s; *p; p++) {
+        if (*p == '#' && (p == s || isspace((unsigned char)p[-1]))) {
+            *p = '\0';
+            return;
+        }
+    }
+}
+
+/* Helper: parse a boolean; returns 0 on success, -1 on unknown value */
+static int parse_bool(const char *s, int *out) {
+    if (strcmp(s, "true") == 0 || strcmp(s, "yes") == 0 || strcmp(s, "1") == 0) {
+        *out = 1;
+        return 0;
+    }
+    if (strcmp(s, "false") == 0 || strcmp(s, "no") == 0 || strcmp(s, "0") == 0) {
+        *out = 0;
+        return 0;
+    }
+    return -1;
+}
+
 /* Helper: parse integer with clamping */
 static int parse_int_clamped(const char *s, int min, int max, int default_val) {
     if (!s || !*s) return default_val;
@@ -57,7 +83,12 @@ static void config_defaults(hw_config *cfg) {
     safe_strcpy(cfg->sys_root, "/sys", sizeof(cfg->sys_root));
 }
 
-int config_load(const char *path, hw_config *cfg) {
+/* Helper: report a rejected value (callback optional) */
+static void warn_line(pamhw_warn_fn warn, void *warn_ctx, int line_no, const char *reason) {
+    if (warn) warn(warn_ctx, line_no, reason);
+}
+
+int config_load(const char *path, hw_config *cfg, pamhw_warn_fn warn, void *warn_ctx) {
     /* Fill with defaults first */
     config_defaults(cfg);
     
@@ -69,9 +100,13 @@ int config_load(const char *path, hw_config *cfg) {
     }
     
     char line[2048];
+    int line_no = 0;
     while (fgets(line, sizeof(line), f)) {
-        /* Remove newline */
+        line_no++;
+        
+        /* Remove newline and inline comment */
         line[strcspn(line, "\n")] = '\0';
+        strip_inline_comment(line);
         
         /* Trim whitespace */
         trim(line);
@@ -94,13 +129,26 @@ int config_load(const char *path, hw_config *cfg) {
         
         /* Process known keys */
         if (strcmp(key, "mode") == 0) {
-            safe_strcpy(cfg->mode, value, sizeof(cfg->mode));
+            if (strcmp(value, "sufficient") == 0 || strcmp(value, "mandatory") == 0) {
+                safe_strcpy(cfg->mode, value, sizeof(cfg->mode));
+            } else {
+                warn_line(warn, warn_ctx, line_no, "unknown mode value, keeping default");
+            }
         } else if (strcmp(key, "verify") == 0) {
-            safe_strcpy(cfg->verify, value, sizeof(cfg->verify));
+            /* Known tiers are stored even if R1 cannot verify them: the
+             * evaluator then fails closed instead of degrading to presence */
+            if (strcmp(value, "presence") == 0 || strcmp(value, "secret") == 0 ||
+                strcmp(value, "sign") == 0) {
+                safe_strcpy(cfg->verify, value, sizeof(cfg->verify));
+            } else {
+                warn_line(warn, warn_ctx, line_no, "unknown verify value, keeping default");
+            }
         } else if (strcmp(key, "timeout_ms") == 0) {
             cfg->timeout_ms = parse_int_clamped(value, 100, 60000, cfg->timeout_ms);
         } else if (strcmp(key, "debug") == 0) {
-            cfg->debug = parse_int_clamped(value, 0, 1, cfg->debug);
+            if (parse_bool(value, &cfg->debug) != 0) {
+                warn_line(warn, warn_ctx, line_no, "unknown debug value, keeping default");
+            }
         } else if (strcmp(key, "services") == 0) {
             safe_strcpy(cfg->services, value, sizeof(cfg->services));
         } else if (strcmp(key, "secret_path") == 0) {

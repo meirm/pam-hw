@@ -20,7 +20,7 @@ static void write_temp_file(const char *path, const char *content) {
 /* Test: Missing file returns defaults */
 T(missing_file_defaults) {
     hw_config cfg;
-    int ret = config_load("/nonexistent/file.conf", &cfg);
+    int ret = config_load("/nonexistent/file.conf", &cfg, NULL, NULL);
     
     EXPECT_INT_EQ(0, ret);
     EXPECT_STR_EQ("sufficient", cfg.mode);
@@ -41,8 +41,8 @@ T(full_file_all_fields) {
     close(fd);
     
     const char *content =
-        "mode = requisite\n"
-        "verify = pin\n"
+        "mode = mandatory\n"
+        "verify = secret\n"
         "timeout_ms = 5000\n"
         "debug = 1\n"
         "services = sshd,login\n"
@@ -53,11 +53,11 @@ T(full_file_all_fields) {
     write_temp_file(path, content);
     
     hw_config cfg;
-    int ret = config_load(path, &cfg);
+    int ret = config_load(path, &cfg, NULL, NULL);
     
     EXPECT_INT_EQ(0, ret);
-    EXPECT_STR_EQ("requisite", cfg.mode);
-    EXPECT_STR_EQ("pin", cfg.verify);
+    EXPECT_STR_EQ("mandatory", cfg.mode);
+    EXPECT_STR_EQ("secret", cfg.verify);
     EXPECT_INT_EQ(5000, cfg.timeout_ms);
     EXPECT_INT_EQ(1, cfg.debug);
     EXPECT_STR_EQ("sshd,login", cfg.services);
@@ -79,7 +79,7 @@ T(timeout_clamp_min) {
     write_temp_file(path, content);
     
     hw_config cfg;
-    int ret = config_load(path, &cfg);
+    int ret = config_load(path, &cfg, NULL, NULL);
     
     EXPECT_INT_EQ(0, ret);
     EXPECT_INT_EQ(100, cfg.timeout_ms);
@@ -98,7 +98,7 @@ T(timeout_clamp_max) {
     write_temp_file(path, content);
     
     hw_config cfg;
-    int ret = config_load(path, &cfg);
+    int ret = config_load(path, &cfg, NULL, NULL);
     
     EXPECT_INT_EQ(0, ret);
     EXPECT_INT_EQ(60000, cfg.timeout_ms);
@@ -121,7 +121,7 @@ T(unknown_key_ignored) {
     write_temp_file(path, content);
     
     hw_config cfg;
-    int ret = config_load(path, &cfg);
+    int ret = config_load(path, &cfg, NULL, NULL);
     
     EXPECT_INT_EQ(0, ret);
     EXPECT_STR_EQ("sufficient", cfg.mode);
@@ -149,7 +149,7 @@ T(comments_and_blanks) {
     write_temp_file(path, content);
     
     hw_config cfg;
-    int ret = config_load(path, &cfg);
+    int ret = config_load(path, &cfg, NULL, NULL);
     
     EXPECT_INT_EQ(0, ret);
     EXPECT_STR_EQ("sufficient", cfg.mode);
@@ -175,7 +175,7 @@ T(spaces_around_equals) {
     write_temp_file(path, content);
     
     hw_config cfg;
-    int ret = config_load(path, &cfg);
+    int ret = config_load(path, &cfg, NULL, NULL);
     
     EXPECT_INT_EQ(0, ret);
     EXPECT_STR_EQ("sufficient", cfg.mode);
@@ -197,7 +197,7 @@ T(empty_file_defaults) {
     write_temp_file(path, "");
     
     hw_config cfg;
-    int ret = config_load(path, &cfg);
+    int ret = config_load(path, &cfg, NULL, NULL);
     
     EXPECT_INT_EQ(0, ret);
     EXPECT_STR_EQ("sufficient", cfg.mode);
@@ -214,16 +214,16 @@ T(partial_config_defaults) {
     close(fd);
     
     const char *content =
-        "mode = requisite\n"
+        "mode = mandatory\n"
         "timeout_ms = 1500\n";
     
     write_temp_file(path, content);
     
     hw_config cfg;
-    int ret = config_load(path, &cfg);
+    int ret = config_load(path, &cfg, NULL, NULL);
     
     EXPECT_INT_EQ(0, ret);
-    EXPECT_STR_EQ("requisite", cfg.mode);
+    EXPECT_STR_EQ("mandatory", cfg.mode);
     EXPECT_INT_EQ(1500, cfg.timeout_ms);
     /* Verify defaults for unspecified fields */
     EXPECT_STR_EQ("presence", cfg.verify);
@@ -250,7 +250,7 @@ T(value_overflow_truncated) {
     write_temp_file(path, content);
     
     hw_config cfg;
-    int ret = config_load(path, &cfg);
+    int ret = config_load(path, &cfg, NULL, NULL);
     
     EXPECT_INT_EQ(0, ret);
     /* Should be truncated to 511 chars + null terminator */
@@ -259,5 +259,124 @@ T(value_overflow_truncated) {
     EXPECT_TRUE(cfg.services[0] == 'x');
     EXPECT_TRUE(cfg.services[510] == 'x');
     
+    unlink(path);
+}
+
+/* Warning-callback recorder for config_load tests */
+typedef struct {
+    int calls;
+    int line_nos[8];
+} cfg_warn_record;
+
+static void record_cfg_warn(void *ctx, int line_no, const char *reason) {
+    cfg_warn_record *r = ctx;
+    (void)reason;
+    if (r->calls < 8) r->line_nos[r->calls] = line_no;
+    r->calls++;
+}
+
+/* Test: the spec's example pamhw.conf, verbatim, parses to the documented values (I3) */
+T(spec_example_config_verbatim) {
+    char path[] = "/tmp/config_test_XXXXXX";
+    int fd = mkstemp(path);
+    EXPECT_TRUE(fd >= 0);
+    close(fd);
+    write_temp_file(path,
+        "mode = sufficient                    # sufficient | mandatory\n"
+        "verify = presence                    # default tier\n"
+        "timeout_ms = 3000\n"
+        "debug = false\n"
+        "services =                           # optional whitelist; empty = all local services\n"
+        "secret_path = .pamhw.sec   # file on stick, relative to mount root\n"
+        "mount_dir = /run/pamhw/mnt    # private read-only mount point\n"
+        "sys_root = /sys                      # overridable for tests\n");
+    hw_config cfg;
+    cfg_warn_record rec = {0};
+    EXPECT_INT_EQ(0, config_load(path, &cfg, record_cfg_warn, &rec));
+    EXPECT_STR_EQ("sufficient", cfg.mode);
+    EXPECT_STR_EQ("presence", cfg.verify);
+    EXPECT_INT_EQ(3000, cfg.timeout_ms);
+    EXPECT_INT_EQ(0, cfg.debug);
+    EXPECT_STR_EQ("", cfg.services);
+    EXPECT_STR_EQ(".pamhw.sec", cfg.secret_path);
+    EXPECT_STR_EQ("/run/pamhw/mnt", cfg.mount_dir);
+    EXPECT_STR_EQ("/sys", cfg.sys_root);
+    EXPECT_INT_EQ(0, rec.calls);
+    unlink(path);
+}
+
+/* Test: inline comment after mode = mandatory keeps mandatory (no silent fail-open) */
+T(inline_comment_mandatory_and_debug_true) {
+    char path[] = "/tmp/config_test_XXXXXX";
+    int fd = mkstemp(path);
+    EXPECT_TRUE(fd >= 0);
+    close(fd);
+    write_temp_file(path,
+        "mode = mandatory  # sufficient | mandatory\n"
+        "debug = true\t# verbose\n"
+        "secret_path = a#b\n");
+    hw_config cfg;
+    EXPECT_INT_EQ(0, config_load(path, &cfg, NULL, NULL));
+    EXPECT_STR_EQ("mandatory", cfg.mode);
+    EXPECT_INT_EQ(1, cfg.debug);
+    /* '#' not preceded by whitespace is part of the value */
+    EXPECT_STR_EQ("a#b", cfg.secret_path);
+    unlink(path);
+}
+
+/* Test: debug accepts true/false/yes/no/1/0; anything else warns and keeps the default */
+T(debug_boolean_values) {
+    const char *on[] = {"true", "yes", "1", NULL};
+    const char *off[] = {"false", "no", "0", NULL};
+    char path[] = "/tmp/config_test_XXXXXX";
+    int fd = mkstemp(path);
+    EXPECT_TRUE(fd >= 0);
+    close(fd);
+    char content[64];
+    hw_config cfg;
+    for (int i = 0; on[i]; i++) {
+        snprintf(content, sizeof(content), "debug = %s\n", on[i]);
+        write_temp_file(path, content);
+        EXPECT_INT_EQ(0, config_load(path, &cfg, NULL, NULL));
+        EXPECT_INT_EQ(1, cfg.debug);
+    }
+    for (int i = 0; off[i]; i++) {
+        snprintf(content, sizeof(content), "debug = true\ndebug = %s\n", off[i]);
+        write_temp_file(path, content);
+        EXPECT_INT_EQ(0, config_load(path, &cfg, NULL, NULL));
+        EXPECT_INT_EQ(0, cfg.debug);
+    }
+    cfg_warn_record rec = {0};
+    write_temp_file(path, "debug = maybe\n");
+    EXPECT_INT_EQ(0, config_load(path, &cfg, record_cfg_warn, &rec));
+    EXPECT_INT_EQ(0, cfg.debug);
+    EXPECT_INT_EQ(1, rec.calls);
+    EXPECT_INT_EQ(1, rec.line_nos[0]);
+    unlink(path);
+}
+
+/* Test: unknown mode / verify values warn and keep defaults; known tiers are stored */
+T(mode_verify_strict_values) {
+    char path[] = "/tmp/config_test_XXXXXX";
+    int fd = mkstemp(path);
+    EXPECT_TRUE(fd >= 0);
+    close(fd);
+    hw_config cfg;
+    cfg_warn_record rec = {0};
+    write_temp_file(path,
+        "# comment\n"
+        "mode = mandator\n"
+        "verify = secrte\n");
+    EXPECT_INT_EQ(0, config_load(path, &cfg, record_cfg_warn, &rec));
+    EXPECT_STR_EQ("sufficient", cfg.mode);
+    EXPECT_STR_EQ("presence", cfg.verify);
+    EXPECT_INT_EQ(2, rec.calls);
+    EXPECT_INT_EQ(2, rec.line_nos[0]);
+    EXPECT_INT_EQ(3, rec.line_nos[1]);
+    
+    /* Known stronger tiers are kept so the evaluator fails closed on them */
+    write_temp_file(path, "verify = sign\n");
+    EXPECT_INT_EQ(0, config_load(path, &cfg, NULL, NULL));
+    EXPECT_STR_EQ("sign", cfg.verify);
     unlink(path);
 }

@@ -729,3 +729,25 @@ T(load_rejects_unknown_verify_and_mode) {
     EXPECT_INT_EQ(3, rec.line_nos[2]);
     unlink(path);
 }
+
+/* Test: inline comments in identities lines (README example: serial-less stick) */
+T(load_inline_comment) {
+    char path[] = "/tmp/identities_test_XXXXXX";
+    int fd = mkstemp(path);
+    EXPECT_TRUE(fd >= 0);
+    close(fd);
+    write_temp_file(path,
+        "usb 1058:25a3 carol   # no serial \xe2\x80\x94 weak\n"
+        "usb\t1234:5678:ab#c\tdave\tverify=presence\t# trailing\n");
+    hw_identity ids[10];
+    int count = 0;
+    warn_record rec = {0};
+    EXPECT_INT_EQ(0, identities_load(path, ids, 10, &count, record_warn, &rec));
+    EXPECT_INT_EQ(0, rec.calls);
+    EXPECT_INT_EQ(2, count);
+    EXPECT_STR_EQ("1058:25a3", ids[0].ident);
+    EXPECT_STR_EQ("carol", ids[0].user);
+    EXPECT_STR_EQ("1234:5678:ab#c", ids[1].ident);
+    EXPECT_STR_EQ("dave", ids[1].user);
+    unlink(path);
+}

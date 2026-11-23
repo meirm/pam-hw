@@ -1365,7 +1365,7 @@ T(probe_flow_capitalized_serial_matches) {
     EXPECT_INT_EQ(0, usb_scan(sysfs, devs, 16, &ndevs));
     EXPECT_INT_EQ(1, ndevs);
     hw_config cfg;
-    EXPECT_INT_EQ(0, config_load(conf_path, &cfg));
+    EXPECT_INT_EQ(0, config_load(conf_path, &cfg, NULL, NULL));
     EXPECT_INT_EQ(PAM_SUCCESS, pamhw_evaluate(&cfg, ids, n, username, devs, ndevs));
     
     /* Mandatory mode: same flow must not lock the user out */

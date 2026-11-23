@@ -23,6 +23,19 @@ static void trim(char *s) {
     *p = '\0';
 }
 
+/*
+ * Helper: cut an inline comment in place. A '#' at line start or preceded
+ * by whitespace begins a comment; a '#' inside a token is kept.
+ */
+static void strip_inline_comment(char *s) {
+    for (char *p = s; *p; p++) {
+        if (*p == '#' && (p == s || isspace((unsigned char)p[-1]))) {
+            *p = '\0';
+            return;
+        }
+    }
+}
+
 /* Helper: case-insensitive string comparison prefix */
 static int is_attr(const char *field, const char *name) {
     size_t len = strlen(name);
@@ -141,14 +154,15 @@ int identities_load(const char *path, hw_identity *out, int max, int *count,
     while (fgets(line, sizeof(line), f)) {
         line_no++;
         
-        /* Remove newline */
+        /* Remove newline and inline comment */
         line[strcspn(line, "\n")] = '\0';
+        strip_inline_comment(line);
         
         /* Trim whitespace */
         trim(line);
         
         /* Skip empty lines and comments */
-        if (line[0] == '\0' || line[0] == '#') continue;
+        if (line[0] == '\0') continue;
         
         /* Parse line: type<TAB>ident<TAB>user[<TAB>attr=value]... */
         char type_str[32], user[64];

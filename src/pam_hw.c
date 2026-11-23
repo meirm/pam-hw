@@ -21,6 +21,11 @@ static void identities_warn_syslog(void *ctx, int line_no, const char *reason) {
                "pam_hw: identities:%d: malformed line, skipped (%s)", line_no, reason);
 }
 
+/* Parser warning sink: rejected pamhw.conf values go to syslog */
+static void config_warn_syslog(void *ctx, int line_no, const char *reason) {
+    pam_syslog((pam_handle_t *)ctx, LOG_WARNING, "pam_hw: pamhw.conf:%d: %s", line_no, reason);
+}
+
 /* Capacity limits for fixed-size arrays */
 #define MAX_IDENTITIES 64
 #define MAX_DEVICES 64
@@ -63,7 +68,7 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
 
     /* Load configuration */
     hw_config cfg;
-    if (config_load("/etc/pamhw/pamhw.conf", &cfg) != 0) {
+    if (config_load("/etc/pamhw/pamhw.conf", &cfg, config_warn_syslog, pamh) != 0) {
         pam_syslog(pamh, LOG_ERR, "pam_hw: config_load failed");
         return PAM_IGNORE;
     }

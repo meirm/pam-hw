@@ -4,6 +4,8 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+#include "warn.h"
+
 typedef struct {
     char mode[16];
     char verify[16];
@@ -25,13 +27,17 @@ typedef struct {
  * 
  * - Missing file returns 0 with defaults (not an error)
  * - Unknown keys are silently ignored
- * - Comments (#) and blank lines allowed
+ * - Comments (#) and blank lines allowed; a '#' at line start or preceded
+ *   by whitespace starts a comment that runs to end of line
  * - Spaces around '=' tolerated
+ * - mode: sufficient|mandatory; verify: presence|secret|sign;
+ *   debug: true|false|yes|no|1|0. Any other value is reported through
+ *   warn (NULL tolerated) and the default is kept.
  * - timeout_ms clamped to [100, 60000]
  * - Values that overflow field size are truncated safely
  * 
  * Returns 0 on success.
  */
-int config_load(const char *path, hw_config *cfg);
+int config_load(const char *path, hw_config *cfg, pamhw_warn_fn warn, void *warn_ctx);
 
 #endif /* CONFIG_H */

@@ -69,6 +69,11 @@ static void identities_warn_stderr(void *ctx, int line_no, const char *reason) {
             (const char *)ctx, line_no, reason);
 }
 
+/* Parser warning sink: rejected configuration values go to stderr */
+static void config_warn_stderr(void *ctx, int line_no, const char *reason) {
+    fprintf(stderr, "Warning: %s:%d: %s\n", (const char *)ctx, line_no, reason);
+}
+
 /* Helper: get invoker username from uid */
 static int get_username(uid_t uid, char *buf, size_t size) {
     struct passwd *pw = getpwuid(uid);
@@ -194,7 +199,7 @@ static int cmd_list(int argc, char **argv) {
     
     /* Load configuration */
     hw_config cfg;
-    if (config_load(conf_path, &cfg) != 0) {
+    if (config_load(conf_path, &cfg, config_warn_stderr, (void *)conf_path) != 0) {
         fprintf(stderr, "Error: failed to load configuration\n");
         return 1;
     }
@@ -377,7 +382,7 @@ static int cmd_add(int argc, char **argv) {
     
     /* Load config */
     hw_config cfg;
-    if (config_load(conf_path, &cfg) != 0) {
+    if (config_load(conf_path, &cfg, config_warn_stderr, (void *)conf_path) != 0) {
         fprintf(stderr, "Error: failed to load configuration\n");
         return 1;
     }
