@@ -5,3 +5,4 @@ pam_hw.so
 pam-hw-probe
 pam-hw-probe-test
 tests/run_tests
+.pi/
