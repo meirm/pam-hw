@@ -19,7 +19,7 @@ TEST_BIN = tests/run_tests
 MODULE_SRC = src/pam_hw.c
 CORE_SRC = src/config.c src/identities.c src/usb_detect.c src/evaluate.c
 PROBE_SRC = probe/main.c
-TEST_SRC = tests/test_main.c tests/test_smoke.c tests/test_identities.c tests/test_config.c tests/test_usb_detect.c tests/test_evaluate.c tests/test_probe.c tests/test_symbols.c
+TEST_SRC = tests/test_main.c tests/test_smoke.c tests/test_ascii.c tests/test_identities.c tests/test_config.c tests/test_usb_detect.c tests/test_evaluate.c tests/test_probe.c tests/test_symbols.c
 
 .PHONY: all test install uninstall clean
 

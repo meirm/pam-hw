@@ -3,6 +3,7 @@
  */
 #define _DEFAULT_SOURCE
 #include "identities.h"
+#include "ascii.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -80,7 +81,7 @@ static int is_valid_username(const char *user) {
     if (len == 0 || len >= sizeof(((hw_identity *)0)->user)) return 0;
     if (user[0] == '#') return 0;
     for (size_t i = 0; i < len; i++) {
-        if (!isgraph((unsigned char)user[i])) return 0;
+        if (!hw_ascii_isgraph((unsigned char)user[i])) return 0;
     }
     return 1;
 }
@@ -93,7 +94,7 @@ int identities_normalize(hw_type t, const char *raw, char *out, int max) {
 
     /* No whitespace, control or non-ASCII bytes anywhere */
     for (size_t i = 0; i < len; i++) {
-        if (!isgraph((unsigned char)raw[i])) return -1;
+        if (!hw_ascii_isgraph((unsigned char)raw[i])) return -1;
     }
 
     if (t == HW_USB) {
@@ -127,8 +128,8 @@ int identities_normalize(hw_type t, const char *raw, char *out, int max) {
 
     /* USB lowercase, BT uppercase */
     for (size_t i = 0; i <= len; i++) {
-        out[i] = (t == HW_USB) ? (char)tolower((unsigned char)raw[i])
-                               : (char)toupper((unsigned char)raw[i]);
+        out[i] = (t == HW_USB) ? (char)hw_ascii_lower((unsigned char)raw[i])
+                               : (char)hw_ascii_upper((unsigned char)raw[i]);
     }
     return 0;
 }

@@ -3,6 +3,7 @@
  */
 #define _DEFAULT_SOURCE
 #include "usb_detect.h"
+#include "ascii.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -76,10 +77,10 @@ static int read_sysfs_file(const char *path, char *buf, size_t size) {
     return 0;
 }
 
-/* Helper: convert to lowercase */
+/* Helper: convert to lowercase (ASCII-only — locale-independent) */
 static void to_lowercase(char *s) {
     for (char *p = s; *p; p++) {
-        *p = tolower((unsigned char)*p);
+        *p = (char)hw_ascii_lower((unsigned char)*p);
     }
 }
 

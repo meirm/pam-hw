@@ -85,6 +85,12 @@ sudo make install          # installs /lib64/security/pam_hw.so and pamhw-probe
    usb  0a12:0001:0123456789  me  verify=presence
    ```
 
+   **Admins:** managing *other users'* lines (`--user bob`, removing
+   someone else's device) needs a real root session. `sudo` and even
+   `sudo -i` carry `SUDO_UID`, so pamhw-probe treats them as the invoking
+   user and refuses — this is the same guard that protects your lines.
+   Use `su -`, or `sudo env -u SUDO_UID pamhw-probe … --user bob`.
+
 3. **Wire the PAM stack** for the services you want (e.g.
    `/etc/pam.d/gdm-password` for the lock screen, `/etc/pam.d/sudo`,
    `/etc/pam.d/login`):
